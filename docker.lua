@@ -41,10 +41,13 @@ local function info(lxc_id)
     return request('GET', '/containers/'..lxc_id..'/json')
 end
 
-local function run(image)
+local function run(image, replica)
     local body = {
             Image = image;
     }
+    if replica ~= nil then
+        body['Env'] = {'REPLICA='..replica}
+    end
 
     --  Create container
     local inf = request('POST', '/containers/create', body)
