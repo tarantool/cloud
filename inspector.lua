@@ -7,6 +7,7 @@ local MEMCACHED_PORT = 3301
 local ADMIN_PORT = 3302
 local TIMEOUT = 1
 local IMAGE_NAME = 'memcached'
+local RPL_WORKING = 'follow'
 
 local STATE_READY = 0
 local STATE_CHECK = 1
@@ -41,28 +42,75 @@ local function set_config(self, config)
     -- need to implement server selection
 end
 
+-- setup master-master replication between memcached nodes
 local function set_replication(self, pair)
     local master1 = pair[1]
     local master2 = pair[2]
     local uri1 = master1.info[2]..':'..tostring(ADMIN_PORT)
     local uri2 = master2.info[2]..':'..tostring(ADMIN_PORT)
     log.info('Set master-master replication between %s and %s', uri1, uri2)
-    master2.conn:eval('box.cfg{replication_source="'..uri1..'"}')
     master1.conn:eval('box.cfg{replication_source="'..uri2..'"}')
 
     check1 = master1.conn:eval('return box.info.replication')
     check2 = master2.conn:eval('return box.info.replication')
 
-    if check1.status ~= 'running' or check2.status ~= 'running' then
+    -- FIXME: status can be "connected", we must wait status "follow"
+    if check1.status ~= RPL_WORKING or check2.status ~= RPL_WORKING then
         -- FIXME: retry after replication error?
         log.error('Replication error between %s and %s', uri1, uri2)
+    end
+    -- debug demo
+    log.info(require('yaml').encode(check1))
+    log.info(require('yaml').encode(check2))
+end
 
-        -- debug
-        log.info(require('yaml').encode(check1))
-        log.info(require('yaml').encode(check2))
+-- check do we need to start with replication source
+local function get_new_master(pair)
+    local master = nil
+    if pair[1].conn:is_connected() then
+        master = pair[1].info[2]
+    elseif pair[2].conn:is_connected() then
+        master = pair[2].info[2]
+    end
+
+    if master ~= nil then
+        return master .. ':' .. tostring(ADMIN_PORT)
     end
 end
 
+-- netbox connections reuse
+local function get_server(self, addr)
+    if self.servers[addr] == nil then
+        self.servers[addr] = netbox.new(
+            addr .. ':' .. tostring(ADMIN_PORT),
+            {wait_connected = false, reconnect_after=1}
+        )
+    end
+    return self.servers[addr]
+end
+
+-- fix broken memcached pair
+local function failover(self, order, pair_conn)
+    local master = get_new_master(pair_conn)
+    local pair = order[4]
+    -- restart instance and udpate metadata
+    for i, server in pairs(pair_conn) do
+        if not server.conn:is_connected() then
+            local info = docker.run(IMAGE_NAME, master)
+            pair[i][1] = info.Id
+            pair[i][2] = info.NetworkSettings.Networks.bridge.IPAddress
+            while not pair_conn[i].conn:is_connected() do
+                fiber.sleep(0.001)
+            end
+            master = get_new_master(pair_conn)
+        end
+    end
+    self:set_replication(pair_conn)
+    -- save pair info
+    box.space.orders:update(order[1], {{'=', 4, pair}})
+end
+
+-- check cloud order and restore it if need
 local function check_order(self, order)
     local pair = order[4]
     local pair_conn = {}
@@ -73,37 +121,25 @@ local function check_order(self, order)
     -- check servers
     for i, server in pairs(pair) do
         image_id, ip_addr, server_id = server[1], server[2], server[3]
+        local conn = self:get_server(ip_addr)
 
-        -- FIXME: extract connection from check_order() and save it
-        conn = netbox:new(
-            ip_addr .. ':' .. tostring(ADMIN_PORT),
-            {wait_connected = false, reconnect_after=1}
-        )
         if conn:wait_connected(TIMEOUT) and conn:ping() then
             log.info('%s is alive', ip_addr)
         else
-            -- restart instance and udpate metadata
             log.info('%s is dead', ip_addr)
-            local info = docker.run(IMAGE_NAME)
-            pair[i][1] = info.Id
-            pair[i][2] = info.NetworkSettings.Networks.bridge.IPAddress
-            while not conn:is_connected() do
-                fiber.sleep(0.001)
-            end
             need_failover = true
         end
         pair_conn[i] = {conn=conn, info=pair[i]}
     end
-
     if need_failover then
-        self:set_replication(pair_conn)
-        -- save pair info
-        box.space.orders:update(order[1], {{'=', 4, pair}})
+        self:failover(order, pair_conn)
     end
+
     box.space.orders:update(order[1], {{'=', 5, STATE_READY}})
     box.commit()
 end
 
+-- orders observer
 local function failover_fiber(self)
     fiber.name('memcached failover')
     while true do
@@ -138,7 +174,10 @@ local function new(config)
         create_spaces = create_spaces,
         check_order = check_order,
         set_config = set_config,
-        set_replication = set_replication
+        set_replication = set_replication,
+        failover = failover,
+        get_server = get_server,
+        servers = {}
     }
     return obj
 end
