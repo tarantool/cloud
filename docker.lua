@@ -24,12 +24,16 @@ local function request(method, uri, body)
     return json.decode(r.body)
 end
 
-
-local function rm(lxc_id)
+local function kill(lxc_id)
     local inf1 = request('POST', '/containers/'..lxc_id..'/kill')
     if not inf1 then
         return
     end
+    log.info('killed container %s', lxc_id)
+end
+
+local function rm(lxc_id)
+    kill(lxc_id)
     local inf2 = request('DELETE', '/containers/'..lxc_id)
     if not inf2 then
         return
@@ -73,6 +77,7 @@ end
 return {
     run=run,
     rm=rm,
+    kill=kill,
     info=info,
     request=request
 }

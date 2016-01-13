@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+  
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memcached clusters list</title>
+    <link href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/media/main.css" rel="stylesheet">
+</head>
+  
+  <body>
+    <div class="navbar navbar-inverse navbar-fixed-top">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="/">Cloud</a>
+        </div>
+      </div>
+    </div>
+    <div class="container">
+      <div class="page-header">
+        <h1>Available memcached clusters</h1>
+        <ul class="list-group clusters">
+        </ul>
+      </div>
+      <div class="col-xs-4">
+      </div>
+      <div class="form-group">
+        <a href="javascript:void(0)" type="submit" style="margin-left: 10px;" id="create_btn" class="btn pull-right btn-success">Create</a>
+        <input type="text" class="pull-right form-control" style="width: 300px" id="create_box">
+      </div>
+      <div class="loader">
+          <img style='width: 35px; margin-right:10px;' src="/media/ajax-circular.gif">
+      </div>
+    </div>
+    <div class="container">
+        <h4 class="limit-error">
+            <span class="pull-right label label-danger">Demo limit for clusters is 1, please remove existing cluster</span>
+        </h4>
+    </div>
+    <!-- /.container -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"
+    >
+    </script>
+    <script src="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/js/bootstrap.min.js"
+    >
+    </script>
+    <script src="/media/tarantool.js"></script>
+    <script src="/media/list.js"></script>
+  </body>
+
+</html>
