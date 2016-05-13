@@ -201,6 +201,7 @@ function detail(id){
         tnt_uri, 
         JSON.stringify({ "method": "detail", "params": [id], "id": 1 }),
         function(res){
+            res = $.parseJSON(res)
             var pair = get_pair(res.result[0]);
             console.log(pair);
             render(pair);

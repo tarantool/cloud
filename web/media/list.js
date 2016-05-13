@@ -12,6 +12,7 @@ function list(){
         tnt_uri, 
         JSON.stringify({ "method": "list", "params": [], "id": 1 }),
         function(res){
+            res = $.parseJSON(res)
             $.map(res.result, function(resp, id){
                 render(get_pair(res.result[id]));
             });
@@ -38,6 +39,7 @@ function create(){
             }
         ),
         function(res){
+            res = $.parseJSON(res)
             if(res.result[0][0]){
                 $('.loader').hide();
                 $('#create_box').show();
