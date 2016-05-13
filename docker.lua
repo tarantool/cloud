@@ -45,9 +45,21 @@ local function info(lxc_id)
     return request('GET', '/containers/'..lxc_id..'/json')
 end
 
-local function run(image, replica)
+local function run(image, network, ip, replica)
     local body = {
-            Image = image;
+        Image = image;
+        NetworkingConfig = {
+            EndpointsConfig = {
+                [network] = {
+                    IPAMConfig = {
+                        IPv4Address = ip;
+                        IPv6Address = "";
+                    };
+                    Links = {};
+                    Aliases = {};
+                };
+            };
+        };
     }
     if replica ~= nil then
         body['Env'] = {'REPLICA='..replica}
@@ -61,9 +73,9 @@ local function run(image, replica)
     end
     local lxc_id = inf.Id
 
-    -- Start container    
+    -- Start container
     local inf = request('POST', '/containers/'..lxc_id..'/start',
-        { Detach = true })
+                        { Detach = true })
     if not inf then
         log.error('failed to start container')
         return false
@@ -74,10 +86,28 @@ local function run(image, replica)
     return inf
 end
 
+local function inspect_network(network_name)
+    local inf = request('GET', '/networks')
+
+    if not inf then
+        log.error('failed to list networks')
+        return false
+    end
+
+    for _, net in ipairs(inf) do
+        if net.Name == network_name then
+            return net
+        end
+    end
+
+    return false
+end
+
 return {
     run=run,
     rm=rm,
     kill=kill,
     info=info,
-    request=request
+    request=request,
+    inspect_network=inspect_network
 }

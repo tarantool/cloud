@@ -1,7 +1,7 @@
 local inspector = require('inspector')
 local fiber = require('fiber')
 local log = require('log')
-local PAIRS_LIMIT = 1
+local PAIRS_LIMIT = 10
 
 box.cfg{listen=33011}
 local cloud = inspector.new()

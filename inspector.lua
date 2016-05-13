@@ -2,6 +2,7 @@ local docker = require('docker')
 local fiber = require('fiber')
 local log = require('log')
 local netbox = require('net.box')
+local iputil = require('iputil')
 
 local MEMCACHED_PORT = 3301
 local ADMIN_PORT = 3302
@@ -16,6 +17,8 @@ local NODE_WORKING = 1
 local STATE_READY = 0
 local STATE_CHECK = 1
 
+local NETWORK_NAME='customnet'
+
 --order schema
 --{
 --  id, user_id, pair_name,
@@ -26,6 +29,41 @@ local STATE_CHECK = 1
 --  }, ]
 --  state
 --}
+
+
+local function lease_ip()
+    local network = docker.inspect_network(NETWORK_NAME)
+
+    local subnet = network.IPAM.Config[1].Subnet
+    local gateway_subnet = network.IPAM.Config[1].Gateway
+    if iputil.is_subnet(gateway_subnet) then
+        gateway_ip = iputil.subnet_get_ip(gateway_subnet)
+    else
+        gateway_ip = gateway_subnet
+    end
+    local used_ips = {}
+    for _, container in pairs(network.Containers) do
+        used_ips[iputil.subnet_get_ip(container.IPv4Address)] = true
+    end
+
+    instances = box.space.orders:select{}
+    for _, tuple in pairs(instances) do
+        for _, server in pairs(tuple[4]) do
+            used_ips[server[2]] = true
+        end
+    end
+
+    local min_ip, max_ip = iputil.subnet_to_range(subnet)
+
+    for int_ip = iputil.ip_str_to_int(min_ip), iputil.ip_str_to_int(max_ip) do
+        ip = ip_int_to_str(int_ip)
+        if used_ips[ip] == nil and ip ~= gateway_ip then
+            return ip
+        end
+    end
+
+    return false
+end
 
 -- create spaces and indexes
 local function create_spaces(self)
@@ -96,11 +134,12 @@ local function get_server(self, addr)
 end
 
 local function add(self, master)
+    ip = lease_ip()
     if master ~= nil then
         master =  master .. ':' .. tostring(ADMIN_PORT)
     end
-    local info = docker.run(IMAGE_NAME, master)
-    return info.Id, info.NetworkSettings.Networks.bridge.IPAddress
+    local info = docker.run(IMAGE_NAME, NETWORK_NAME, ip, master)
+    return info.Id, info.NetworkSettings.Networks[NETWORK_NAME].IPAddress
 end
 
 local function drop(self, container_id)
@@ -138,9 +177,9 @@ local function failover(self, order, pair_conn)
     -- restart instance and udpate metadata
     for i, server in pairs(pair_conn) do
         if not server.conn:is_connected() then
-            local info = docker.run(IMAGE_NAME, master)
+            local info = docker.run(IMAGE_NAME, NETWORK_NAME, pair[i][2], master)
             pair[i][1] = info.Id
-            pair[i][2] = info.NetworkSettings.Networks.bridge.IPAddress
+            pair[i][2] = info.NetworkSettings.Networks[NETWORK_NAME].IPAddress
 
             while not pair_conn[i].conn:is_connected() do
                 fiber.sleep(0.001)
@@ -260,6 +299,7 @@ local function new(config)
 end
 
 local lib = {
-    new = new
+   new = new,
+   lease_ip = lease_ip
 }
 return lib
