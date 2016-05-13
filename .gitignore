@@ -1,2 +1,4 @@
 *.xlog
 *.snap
+.vagrant
+*.retry
