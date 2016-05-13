@@ -70,7 +70,6 @@
       dest=/opt/src/tarantool-nginx-module
       version=dynamic-modules-build-fix
       force=yes
-    register: nginx_module_checked_out
 
   - name: check out nginx source
     git:
@@ -78,11 +77,16 @@
       dest=/opt/src/tarantool-nginx-module/nginx
       version=release-1.10.0
       force=yes
-    register: nginx_checked_out
 
+  - name: check out tarantool cloud source
+    git:
+      repo=https://github.com/tarantool/cloud.git
+      dest=/opt/tarantool/cloud
+      version=master
+      force=yes
+    when: localdeploy is undefined
 
   - name: build tarantool nginx module
-    when: nginx_module_checked_out | changed
     shell: |
       make yajl
       cd /opt/src/tarantool-nginx-module/nginx
