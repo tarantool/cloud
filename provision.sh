@@ -1,5 +1,7 @@
 #!/bin/bash
 
+MY_IP=$(hostname -I | cut -d' ' -f2)
+
 sudo tee /etc/yum.repos.d/docker.repo <<-'EOF'
 [dockerrepo]
 name=Docker Repository
@@ -12,16 +14,17 @@ EOF
 sudo yum -y install docker-engine
 
 sudo mkdir -p /etc/systemd/system/docker.service.d
-sudo tee /etc/systemd/system/docker.service.d/docker.conf <<-'EOF'
+sudo tee /etc/systemd/system/docker.service.d/docker.conf <<-EOF
 [Service]
 ExecStart=
-ExecStart=/usr/bin/docker daemon -H fd:// -H tcp://0.0.0.0:2375
+ExecStart=/usr/bin/docker daemon -H fd:// -H tcp://0.0.0.0:2375 --cluster-advertise="$MY_IP:8500" --cluster-store="consul://$MY_IP:8500"
 EOF
 
+sudo systemctl daemon-reload
 sudo systemctl enable docker
 sudo systemctl restart docker
 
-MY_IP=$(hostname -I | cut -d' ' -f2)
+
 
 sudo docker pull consul
 sudo docker pull swarm
