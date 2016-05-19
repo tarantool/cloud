@@ -24,8 +24,6 @@ sudo systemctl daemon-reload
 sudo systemctl enable docker
 sudo systemctl restart docker
 
-
-
 sudo docker pull consul
 sudo docker pull swarm
 
@@ -54,8 +52,20 @@ sudo docker run -d -p 4000:4000 \
      --advertise $MY_IP:4000\
      consul://$MY_IP:8500
 
+if [ ! -f /usr/bin/weave ]; then
+    sudo curl -L git.io/weave -o /usr/bin/weave
+fi
+
+sudo chmod a+x /usr/bin/weave
+
+weave stop
+weave launch --ipalloc-range 172.21.0.0/16 172.20.20.10 172.20.20.20 172.20.20.30
+weave stop-proxy
+weave launch-proxy -H tcp://0.0.0.0:12375
+
 sudo docker stop swarm_node
 sudo docker rm swarm_node
 
+# advertise the weave wrapper
 docker run -d --name swarm_node swarm join \
-       --advertise=$MY_IP:2375 consul://$MY_IP:8500
+       --advertise=$MY_IP:12375 consul://$MY_IP:8500
