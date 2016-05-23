@@ -5,7 +5,7 @@ Vagrant.configure(2) do |config|
   config.vm.box = 'bento/centos-7.2'
 
   config.vm.provider 'parallels' do |prl|
-    prl.update_guest_tools = true
+#    prl.update_guest_tools = true
   end
 
   config.vm.define 'node1' do |node|
