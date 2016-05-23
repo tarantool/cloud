@@ -2,6 +2,8 @@
 
 MY_IP=$(hostname -I | cut -d' ' -f2)
 
+PEERS="172.20.20.10 172.20.20.20 172.20.20.30"
+
 sudo tee /etc/yum.repos.d/docker.repo <<-'EOF'
 [dockerrepo]
 name=Docker Repository
@@ -11,7 +13,16 @@ gpgcheck=1
 gpgkey=https://yum.dockerproject.org/gpg
 EOF
 
-sudo yum -y install docker-engine
+if ! rpm -q --quiet docker-engine; then
+   sudo yum -y install docker-engine
+fi
+
+if [ ! -f /usr/bin/weave ]; then
+    sudo curl -L git.io/weave -o /usr/bin/weave
+fi
+
+sudo chmod a+x /usr/bin/weave
+
 
 sudo mkdir -p /etc/systemd/system/docker.service.d
 sudo tee /etc/systemd/system/docker.service.d/docker.conf <<-EOF
@@ -20,52 +31,54 @@ ExecStart=
 ExecStart=/usr/bin/docker daemon -H fd:// -H tcp://0.0.0.0:2375 --cluster-advertise="$MY_IP:8500" --cluster-store="consul://$MY_IP:8500"
 EOF
 
-sudo systemctl daemon-reload
-sudo systemctl enable docker
-sudo systemctl restart docker
+mkdir -p /opt/tarantool_cloud
+cp /vagrant/docker_wrapper.sh /opt/tarantool_cloud/docker_wrapper.sh
+cp /vagrant/systemd/consul.service /etc/systemd/system/consul.service
+cp /vagrant/systemd/weave.service /etc/systemd/system/weave.service
+cp /vagrant/systemd/weaveproxy.service /etc/systemd/system/weaveproxy.service
+cp /vagrant/systemd/swarm.service /etc/systemd/system/swarm.service
+cp /vagrant/systemd/swarm_client.service /etc/systemd/system/swarm_client.service
 
-sudo docker pull consul
-sudo docker pull swarm
-
-sudo docker stop consul_server
-sudo docker rm consul_server
-
-
-sudo docker run -d --net=host -e \
-       'CONSUL_LOCAL_CONFIG={"skip_leave_on_interrupt": true}'\
-       --name consul_server\
-       consul agent -server -bootstrap-expect=3\
+sudo tee /etc/consul.env <<-EOF
+OPTIONS=-server -bootstrap-expect=3\
        -advertise=$MY_IP\
        -ui\
        -client 0.0.0.0\
        -retry-join=172.20.20.10\
        -retry-join=172.20.20.20\
-       -retry-join=172.20.20.30
+       -retry-join=172.20.20.30\
+       -bind $MY_IP
+EOF
 
-sudo docker stop swarm_server
-sudo docker rm swarm_server
-
-sudo docker run -d -p 4000:4000 \
-     --name swarm_server\
-     swarm manage -H :4000 \
+sudo tee /etc/swarm.env <<-EOF
+PORT_MAP=-p 4000:4000
+SWARM_SERVER_OPTIONS=-H :4000 \
      --replication \
      --advertise $MY_IP:4000\
      consul://$MY_IP:8500
+SWARM_CLIENT_OPTIONS=-advertise=$MY_IP:12375\
+        consul://$MY_IP:8500
+EOF
 
-if [ ! -f /usr/bin/weave ]; then
-    sudo curl -L git.io/weave -o /usr/bin/weave
-fi
+sudo tee /etc/weave.env <<-EOF
+WEAVE_ROUTER_ARGS=--ipalloc-range 172.21.0.0/16
+WEAVE_PROXY_ARGS=-H tcp://0.0.0.0:12375
+PEERS=172.20.20.10 172.20.20.20 172.20.20.30
+EOF
 
-sudo chmod a+x /usr/bin/weave
 
-weave stop
-weave launch --ipalloc-range 172.21.0.0/16 172.20.20.10 172.20.20.20 172.20.20.30
-weave stop-proxy
-weave launch-proxy -H tcp://0.0.0.0:12375
+sudo systemctl daemon-reload
 
-sudo docker stop swarm_node
-sudo docker rm swarm_node
+sudo systemctl enable docker
+sudo systemctl enable consul
+sudo systemctl enable weave
+sudo systemctl enable weaveproxy
+sudo systemctl enable swarm
+sudo systemctl enable swarm_client
 
-# advertise the weave wrapper
-docker run -d --name swarm_node swarm join \
-       --advertise=$MY_IP:12375 consul://$MY_IP:8500
+sudo systemctl restart docker
+sudo systemctl restart consul
+sudo systemctl restart weave
+sudo systemctl restart weaveproxy
+sudo systemctl restart swarm
+sudo systemctl restart swarm_client
