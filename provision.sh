@@ -27,6 +27,9 @@ EOF
 
 mkdir -p /opt/tarantool_cloud
 cp /vagrant/docker_wrapper.sh /opt/tarantool_cloud/docker_wrapper.sh
+cp -r /vagrant/consul.d /opt/tarantool_cloud
+cp /vagrant/app.lua /opt/tarantool_cloud/app.lua
+
 cp /vagrant/systemd/consul.service /etc/systemd/system/consul.service
 cp /vagrant/systemd/swarm.service /etc/systemd/system/swarm.service
 cp /vagrant/systemd/swarm_client.service /etc/systemd/system/swarm_client.service
@@ -54,7 +57,7 @@ SWARM_CLIENT_OPTIONS=-advertise=$MY_IP:2375\
 EOF
 
 sudo tee /etc/macvlan-settings.env <<-EOF
-INTERFACE=eth0
+INTERFACE=eth1
 EOF
 
 sudo systemctl daemon-reload
@@ -65,8 +68,12 @@ sudo systemctl enable swarm
 sudo systemctl enable swarm_client
 sudo systemctl enable macvlan-settings
 
-sudo systemctl restart docker
+sudo systemctl start docker
 sudo systemctl restart consul
 sudo systemctl restart swarm
 sudo systemctl restart swarm_client
 sudo systemctl restart macvlan-settings
+
+if ! docker network inspect macvlan 2>/dev/null >/dev/null; then
+    docker network create -d macvlan --subnet=172.20.20.0/24 --gateway=172.20.20.1 --ip-range=172.20.20.128/25 -o parent=eth1 -o macvlan_mode=bridge macvlan
+fi
