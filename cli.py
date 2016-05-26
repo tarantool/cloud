@@ -50,6 +50,15 @@ def list_instances(host, quiet = False):
         groups = set([i['group'] for i in instances])
         print '\n'.join(groups)
 
+def failover_instances(host, instances):
+    a = api.Api(host)
+
+    if not instances:
+        pairs = a.list_memcached_pairs()
+        instances = list(set([i['group'] for i in pairs]))
+
+    for instance in instances:
+        a.failover_instance(instance)
 
 
 
@@ -63,6 +72,8 @@ def main():
     run_parser.add_argument('name')
     rm_parser = subparsers.add_parser('rm')
     rm_parser.add_argument('instance_id', nargs='+')
+    failover_parser = subparsers.add_parser('failover')
+    failover_parser.add_argument('instance_id', nargs='*')
 
     args = parser.parse_args()
 
@@ -80,7 +91,8 @@ def main():
         create_instance(host, args.name)
     elif args.subparser_name == 'rm':
         delete_instance(host, args.instance_id)
-
+    elif args.subparser_name == 'failover':
+        failover_instances(host, args.instance_id)
 
 
 

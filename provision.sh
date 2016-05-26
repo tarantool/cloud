@@ -29,15 +29,16 @@ mkdir -p /opt/tarantool_cloud
 cp /vagrant/docker_wrapper.sh /opt/tarantool_cloud/docker_wrapper.sh
 cp -r /vagrant/consul.d /opt/tarantool_cloud
 cp /vagrant/app.lua /opt/tarantool_cloud/app.lua
+cp -r /vagrant/mon.d /opt/tarantool_cloud/mon.d
 
 cp /vagrant/systemd/consul.service /etc/systemd/system/consul.service
-cp /vagrant/systemd/swarm.service /etc/systemd/system/swarm.service
-cp /vagrant/systemd/swarm_client.service /etc/systemd/system/swarm_client.service
 cp /vagrant/systemd/macvlan-settings.service /etc/systemd/system/macvlan-settings.service
 
 sudo tee /etc/consul.env <<-EOF
+DOCKER_HOST=localhost:2375
 OPTIONS=-server -bootstrap-expect=3\
        -advertise=$MY_IP\
+       -log-level=debug\
        -ui\
        -client 0.0.0.0\
        -retry-join=172.20.20.10\
@@ -64,14 +65,10 @@ sudo systemctl daemon-reload
 
 sudo systemctl enable docker
 sudo systemctl enable consul
-sudo systemctl enable swarm
-sudo systemctl enable swarm_client
 sudo systemctl enable macvlan-settings
 
 sudo systemctl start docker
 sudo systemctl restart consul
-sudo systemctl restart swarm
-sudo systemctl restart swarm_client
 sudo systemctl restart macvlan-settings
 
 if ! docker network inspect macvlan 2>/dev/null >/dev/null; then

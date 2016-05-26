@@ -7,6 +7,8 @@ import consul
 import uuid
 import random
 import ipaddress
+import tarantool
+import time
 
 from contextlib import contextmanager
 
@@ -102,11 +104,18 @@ class Api(object):
         target_app ='/var/lib/tarantool/app.lua'
         src_app = '/opt/tarantool_cloud/app.lua'
 
+        target_mon = '/var/lib/mon.d'
+        src_mon = '/opt/tarantool_cloud/mon.d'
+
         host_config = docker.create_host_config(
             binds =
             {
                 src_app : {
                     'bind' : target_app,
+                    'mode' : 'ro'
+                },
+                src_mon : {
+                    'bind' : target_mon,
                     'mode' : 'ro'
                 }
             })
@@ -133,11 +142,17 @@ class Api(object):
             }
         }
 
+        environment = {}
+
+        if replica_ip:
+            environment['REPLICA'] = replica_ip + ':3302'
+
         container = docker.create_container(image='tarantool/tarantool:latest',
                                                  name=instance_id,
                                             command=cmd,
                                             host_config=host_config,
-                                            networking_config=networking_config)
+                                            networking_config=networking_config,
+                                            environment=environment)
 
         docker.connect_container_to_network(container.get('Id'),
                                             'macvlan',
@@ -164,12 +179,19 @@ class Api(object):
 
 
         #check = consul.Check.http("http://%s:8080/ping" % ipaddr, "10s")
-        #check = consul.Check.docker(instance_id, "/bin/sh", "/bin/ps", "10s")
+        check = {
+            'docker_container_id': instance_id,
+            'shell': "/bin/bash",
+            'script': "/var/lib/mon.d/tarantool_replication.sh",
+            'interval': "10s",
+            'status' : 'warning'
+        }
+
         ret = consul_obj.agent.service.register("memcached",
                                                 service_id=instance_id,
                                                 address=ipaddr,
-                                                port=3301)
-                                                #check=check)
+                                                port=3301,
+                                                check=check)
 
 
     def unregister_tarantool_service(self, consul_obj, docker, instance_id):
@@ -225,11 +247,28 @@ class Api(object):
 
         self.create_memcached_blueprint(pair_id, name, ip1, ip2)
 
-        instance1 = self.create_memcached(docker1, pair_id+'_1', ip1, ip2)
+        instance1 = self.create_memcached(docker1, pair_id+'_1', ip1, None)
         instance2 = self.create_memcached(docker2, pair_id+'_2', ip2, ip1)
+
+        timeout = time.time() + 10
+        connection_success = False
+        while time.time() < timeout:
+            try:
+                tarantool.Connection(ip1, 3302)
+                tarantool.Connection(ip2, 3302)
+                connection_success = True
+                break
+            except tarantool.error.NetworkError:
+                pass
+            time.sleep(0.5)
+
+        if not connection_success:
+            raise RuntimeError("Failed to connect to the created instances")
 
         self.register_tarantool_service(consul1, docker1, instance1, name)
         self.register_tarantool_service(consul2, docker2, instance2, name)
+
+        self.enable_memcached_replication(ip1+':3301', ip2+':3301')
 
         return pair_id
 
@@ -291,16 +330,19 @@ class Api(object):
         # collect instance statuses from registered services
         status = {}
         for entry in health:
-            passing = True
+            check_total = "passing"
             for check in entry['Checks']:
-                passing = passing and (check['Status'] == 'passing')
+                if check['Status'] == 'critical':
+                    check_total = 'critical'
+                elif check['Status'] == 'warning' and check_total == 'passing':
+                    check_total = 'warning'
 
             host = entry['Service']['Address'] or entry['Node']['Address']
             port = entry['Service']['Port']
             addr = '%s:%s' % (host, port)
             node = entry['Node']['Address']
 
-            status[entry['Service']['ID']] = {'check': passing,
+            status[entry['Service']['ID']] = {'check': check_total,
                                               'addr': addr,
                                               'node': node}
 
@@ -308,9 +350,11 @@ class Api(object):
         for instance, instance_type in instances.iteritems():
             group, instance_no = instance.split('_')
 
-            if status[instance]['check']:
+            if status[instance]['check'] == 'passing':
                 state = 'OK'
-            else:
+            if status[instance]['check'] == 'warning':
+                state = 'Warning'
+            if status[instance]['check'] == 'critical':
                 state = 'Fail'
 
             result.append({'group': group,
@@ -321,3 +365,49 @@ class Api(object):
                            'node': status[instance]['node']})
 
         return result
+
+    def enable_memcached_replication(self, memcached1, memcached2):
+        memc1_host = memcached1.split(':')[0]
+        memc1_port = 3302
+        memc2_host = memcached2.split(':')[0]
+        memc2_port = 3302
+
+        memc1 = tarantool.Connection(memc1_host, 3302)
+        memc2 = tarantool.Connection(memc2_host, 3302)
+
+        cmd = "box.cfg{replication_source=\"%s:%d\"}"
+
+        memc1_repl_status = memc1.eval("return box.info.replication['status']")
+        memc2_repl_status = memc2.eval("return box.info.replication['status']")
+
+        if 'follow' not in memc1_repl_status:
+            memc1.eval((cmd % (memc2_host, memc2_port)).encode('ascii','ignore'))
+
+        if 'follow' not in memc2_repl_status:
+            memc2.eval((cmd % (memc1_host, memc1_port)).encode('ascii','ignore'))
+
+        timeout = time.time() + 10
+        while time.time() < timeout:
+            memc1_repl_status = memc1.eval("return box.info.replication['status']")
+            memc2_repl_status = memc2.eval("return box.info.replication['status']")
+
+            if 'follow' in memc1_repl_status and 'follow' in memc2_repl_status:
+                break
+            time.sleep(0.5)
+
+        if 'follow' not in memc1_repl_status:
+            raise RuntimeError("Failed to enable replication on '%s'" % memcached1)
+
+        if 'follow' not in memc2_repl_status:
+            raise RuntimeError("Failed to enable replication on '%s'" % memcached2)
+
+
+    def failover_instance(self, pair_id):
+
+        pairs = self.list_memcached_pairs()
+
+        matching_pair = [i['addr'] for i in pairs if i['group'] == pair_id]
+
+        assert(len(matching_pair) == 2)
+
+        self.enable_memcached_replication(matching_pair[0], matching_pair[1])
