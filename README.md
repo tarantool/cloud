@@ -23,3 +23,14 @@ vagrant up
 ```
 
 Please note, that while there is no real provisioning, the consul server is bootstrapped using static IPs, thus Vagrant is forced to pin those static IPs to VMs. If something doesn't work for you, it is likely because of IP address clash. See `Vagrantfile` for details.
+
+To create a tarantool-memcached instance, do this:
+
+```sh
+export CONSUL_HOST=172.20.20.10
+./cli.py run myinstance
+
+./cli.py ps
+```
+
+After running `./cli.py ps` you will get a list of running memcached instances and their IP addresses. Now you can connect to them and use them.
