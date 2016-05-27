@@ -318,13 +318,14 @@ class Api(object):
                 groups[match.group(1)] = entry['Value']
 
         # collect instances from blueprints
-        instances = {} # <instance id>: <type>
+        instances = {} # <instance id>: {'type': <type>, 'addr': <addr>}
         for entry in tarantool_kv:
             match = re.match('tarantool/(.*)/instances/(.*)', entry['Key'])
             if match:
                 group = match.group(1)
                 instance = match.group(2)
-                instances[group + '_' + instance] = groups[group]
+                instances[group + '_' + instance] = {'type': groups[group],
+                                                     'addr': entry['Value']}
 
 
         # collect instance statuses from registered services
@@ -347,22 +348,25 @@ class Api(object):
                                               'node': node}
 
         result = []
-        for instance, instance_type in instances.iteritems():
-            group, instance_no = instance.split('_')
+        for instance in instances.iterkeys():
 
-            if status[instance]['check'] == 'passing':
-                state = 'OK'
-            if status[instance]['check'] == 'warning':
-                state = 'Warning'
-            if status[instance]['check'] == 'critical':
-                state = 'Fail'
+            if instance not in status:
+                state = 'missing'
+                addr = instances[instance]['addr']
+                node = 'N/A'
+            else:
+                state = status[instance]['check']
+                addr = status[instance]['addr']
+                node = status[instance]['node']
+
+            group, instance_no = instance.split('_')
 
             result.append({'group': group,
                            'instance': instance_no,
-                           'type': instance_type,
+                           'type': instances[instance]['type'],
                            'state': state,
-                           'addr': status[instance]['addr'],
-                           'node': status[instance]['node']})
+                           'addr': addr,
+                           'node': node})
 
         return result
 
@@ -403,11 +407,47 @@ class Api(object):
 
 
     def failover_instance(self, pair_id):
-
         pairs = self.list_memcached_pairs()
 
-        matching_pair = [i['addr'] for i in pairs if i['group'] == pair_id]
+        pair = [i for i in pairs if i['group'] == pair_id]
 
-        assert(len(matching_pair) == 2)
+        assert(len(pair) == 2)
 
-        self.enable_memcached_replication(matching_pair[0], matching_pair[1])
+        for idx in range(len(pair)):
+            if pair[idx]['state'] not in ('critical', 'missing'):
+                continue
+            other = len(pair) - idx - 1
+
+            instance_id = pair[idx]['group'] + '_' + pair[idx]['instance']
+            consul_host, docker_host = self.locate_tarantool_service(
+                self.consul, instance_id)
+
+            if consul_host and docker_host:
+                consul_obj = consul.Consul(host=consul_host)
+                docker_obj = docker.Client(base_url=docker_host)
+
+                try:
+                    self.delete_tarantool_service(consul_obj, docker_obj, instance_id)
+                except:
+                    pass
+
+                self.unregister_tarantool_service(consul_obj, docker_obj, instance_id)
+
+            healthy_nodes = self.get_healthy_docker_nodes()
+            nodes_to_pick = [n for n in healthy_nodes if n[0] != pair[idx]['node']]
+            pick = random.choice(nodes_to_pick)
+
+            consul_host, docker_host = pick
+            docker_obj = docker.Client(base_url=docker_host)
+            consul_obj = consul.Consul(host=consul_host)
+
+            self.create_memcached(docker_obj,
+                                  instance_id,
+                                  pair[idx]['addr'].split(':')[0],
+                                  pair[other]['addr'].split(':')[0])
+
+            self.register_tarantool_service(consul_obj,
+                                            docker_obj,
+                                            instance_id, "")
+        #self.enable_memcached_replication(matching_pair[0]['addr'],
+        #                                  matching_pair[1]['addr'])
