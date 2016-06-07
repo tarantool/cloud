@@ -44,3 +44,41 @@ teardown()
     [ -z "$(cli.py ps -q)" ]
 
 }
+
+@test "heal missing instance" {
+    id=$(cli.py run foobar|tail -1)
+
+    ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
+
+    ping -c1 -t1 $ip
+
+    for docker_host in $(consul_get_docker_hosts $CONSUL_HOST); do
+        docker_delete_instance $docker_host "${id}_1"
+    done
+
+    ! ping -c1 -t1 $ip
+
+    ./cli.py heal
+
+    ping -c1 -t1 $ip
+}
+
+@test "delete instance with missing blueprint" {
+    id=$(cli.py run foobar|tail -1)
+
+    ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
+
+    ping -c1 -t1 $ip
+
+    consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id
+
+    ./cli.py heal
+
+    ! ping -c1 -t1 $ip
+}
+
+
+@test "recreate missing allocations and containers" {
+
+
+}

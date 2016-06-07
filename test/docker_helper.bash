@@ -13,3 +13,12 @@ docker_delete_instances()
         docker -H "$docker_host" rm $container > /dev/null
     done
 }
+
+docker_delete_instance()
+{
+    docker_host=$1
+    instance_id=$2
+
+    docker -H "$docker_host" stop $instance_id > /dev/null || true
+    docker -H "$docker_host" rm $instance_id > /dev/null || true
+}

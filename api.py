@@ -9,10 +9,22 @@ import random
 import ipaddress
 import tarantool
 import time
+import logging
 
 from contextlib import contextmanager
 
 THIS_FILE_DIR = os.path.dirname(os.path.realpath(__file__))
+
+
+def combine_consul_statuses(statuses):
+    total = "passing"
+    for status in statuses:
+        if status == 'critical':
+            total = 'critical'
+        elif status == 'warning' and total == 'passing':
+            total = 'warning'
+    return total
+
 
 
 class Api(object):
@@ -94,12 +106,15 @@ class Api(object):
         kv = self.consul.kv
 
         kv.put('tarantool/%s/type' % pair_id, 'memcached')
+        kv.put('tarantool/%s/name' % pair_id, name)
         kv.put('tarantool/%s/instances/1' % pair_id, ip1)
         kv.put('tarantool/%s/instances/2' % pair_id, ip2)
 
 
-    def create_memcached(self, docker, instance_id, instance_ip, replica_ip):
-        #print "Creating memcached '%s' on '%s' with ip %s" % (instance_id, docker.base_url, instance_ip)
+    def create_memcached(self, docker_host, instance_id, instance_ip, replica_ip):
+        docker_obj = docker.Client(base_url=docker_host+':2375')
+        logging.info("Creating memcached '%s' on '%s' with ip %s",
+                     instance_id, docker_obj.base_url, instance_ip)
 
         target_app ='/var/lib/tarantool/app.lua'
         src_app = '/opt/tarantool_cloud/app.lua'
@@ -107,7 +122,7 @@ class Api(object):
         target_mon = '/var/lib/mon.d'
         src_mon = '/opt/tarantool_cloud/mon.d'
 
-        host_config = docker.create_host_config(
+        host_config = docker_obj.create_host_config(
             binds =
             {
                 src_app : {
@@ -122,7 +137,7 @@ class Api(object):
 
         cmd = 'tarantool /var/lib/tarantool/app.lua'
 
-        self.ensure_docker_image(docker, 'tarantool/tarantool:latest')
+        self.ensure_docker_image(docker_obj, 'tarantool/tarantool:latest')
 
         networking_config = {
             'EndpointsConfig':
@@ -147,37 +162,37 @@ class Api(object):
         if replica_ip:
             environment['REPLICA'] = replica_ip + ':3302'
 
-        container = docker.create_container(image='tarantool/tarantool:latest',
-                                                 name=instance_id,
-                                            command=cmd,
-                                            host_config=host_config,
-                                            networking_config=networking_config,
-                                            environment=environment)
+        container = docker_obj.create_container(image='tarantool/tarantool:latest',
+                                                name=instance_id,
+                                                command=cmd,
+                                                host_config=host_config,
+                                                networking_config=networking_config,
+                                                environment=environment,
+                                                labels=['memcached'])
 
-        docker.connect_container_to_network(container.get('Id'),
-                                            'macvlan',
-                                            ipv4_address=instance_ip)
-        docker.start(container=container.get('Id'))
+        docker_obj.connect_container_to_network(container.get('Id'),
+                                                'macvlan',
+                                                ipv4_address=instance_ip)
+        docker_obj.start(container=container.get('Id'))
 
         return instance_id
 
-    def delete_tarantool_service(self, consul_obj, docker_obj, instance_id):
-        #print "Removing container '%s' from '%s'" % (instance_id, docker_obj.base_url)
+    def delete_container(self, instance_id):
+
+        consul_host, docker_host = \
+            self.locate_tarantool_service(instance_id)
+
+        logging.info("Deleting instance '%s' from '%s'",
+                     instance_id,
+                     docker_host)
+
+        docker_obj = docker.Client(base_url=docker_host)
+
         docker_obj.stop(container=instance_id)
         docker_obj.remove_container(container=instance_id)
 
-    def register_memcached(self, instance_id, name):
-        pass
-
-    def register_tarantool_service(self, consul_obj, docker, instance_id, name):
-        info = docker.inspect_container(instance_id)
-
-        networks = info['NetworkSettings']['Networks']
-        assert(len(networks)==1)
-
-        ipaddr = networks.values()[0]['IPAddress']
-
-
+    def register_tarantool_service(self, consul_host, ipaddr, instance_id, name):
+        consul_obj = consul.Consul(host=consul_host)
         #check = consul.Check.http("http://%s:8080/ping" % ipaddr, "10s")
         check = {
             'docker_container_id': instance_id,
@@ -194,10 +209,14 @@ class Api(object):
                                                 check=check)
 
 
-    def unregister_tarantool_service(self, consul_obj, docker, instance_id):
+    def unregister_tarantool_service(self, instance_id):
+        consul_host, docker_host = \
+            self.locate_tarantool_service(instance_id)
+
+        consul_obj = consul.Consul(host=consul_host)
         consul_obj.agent.service.deregister(instance_id)
 
-    def locate_tarantool_service(self, consul_obj, instance_id):
+    def locate_tarantool_service(self, instance_id):
         health = self.consul.health.service("memcached")[1]
 
         for service in health:
@@ -220,14 +239,298 @@ class Api(object):
         return None, None
 
 
+    def get_blueprints(self):
+        """
+        returns a list of registered groups:
+        {
+            'type': 'memcached',
+            'name': '<group name>',
+            'instances': {
+                '1': {'addr': '<ip addr>'},
+                '2': {'addr': '<ip addr>'}
+            }
+        }
+        """
+        kv = self.consul.kv
+        tarantool_kv = kv.get('tarantool', recurse=True)[1] or []
 
-    def create_memcached_pair(self, name):
-        pair_id = self.generate_id()
-        instance1 = None
-        instance2 = None
+        groups = {}
+        for entry in tarantool_kv:
+            match = re.match('tarantool/(.*)/type', entry['Key'])
+            if match:
+                groups[match.group(1)] = {'type': entry['Value'],
+                                          'instances': {}}
 
-        self.get_healthy_docker_nodes()
+        for entry in tarantool_kv:
+            match = re.match('tarantool/(.*)/name', entry['Key'])
+            if match:
+                groups[match.group(1)]['name'] = entry['Value']
 
+            match = re.match('tarantool/(.*)/instances/(.*)', entry['Key'])
+            if match:
+                group = match.group(1)
+                instance_id = match.group(2)
+
+                groups[group]['instances'][instance_id] = {
+                    'addr': entry['Value']
+                }
+
+        return groups
+
+
+    def get_allocations(self):
+        """
+        returns a list of allocated groups:
+        {
+            'type': 'memcached',
+            'name': '<group name>',
+            'instances': {
+                '1': {'addr': '<ip addr>', 'host': '<host addr>'},
+                '2': {'addr': '<ip addr>', 'host': '<host addr>'}
+            }
+        }
+        """
+        health = self.consul.health.service('memcached')[1]
+
+        groups = {}
+        for entry in health:
+            group, instance_id = entry['Service']['ID'].split('_')
+            host = entry['Service']['Address'] or entry['Node']['Address']
+            port = entry['Service']['Port']
+            addr = '%s:%s' % (host, port)
+            node = entry['Node']['Address']
+
+            statuses = [check['Status'] for check in entry['Checks']]
+            status = combine_consul_statuses(statuses)
+
+            if group not in groups:
+                groups[group] = {}
+                groups[group]['type'] = 'memcached'
+                groups[group]['name'] = ''
+                groups[group]['instances'] = {}
+
+            groups[group]['instances'][instance_id] = {
+                'addr': addr,
+                'host': node,
+                'status': status
+            }
+
+        return groups
+
+
+    def get_emergent_state(self):
+        """
+        returns a list of actual groups:
+        {
+            'type': 'memcached',
+            'name': '<group name>',
+            'instances': {
+                '1': {'addr': '<ip addr>', 'host': '<host addr>'},
+                '2': {'addr': '<ip addr>', 'host': '<host addr>'}
+            }
+        }
+        """
+
+        docker_nodes = self.get_healthy_docker_nodes()
+
+        groups = {}
+
+        for node in docker_nodes:
+            docker_obj = docker.Client(base_url=node[1])
+
+            for container in docker_obj.containers(all=True,
+                                                   filters={'label': 'memcached'}):
+
+                instance_name = container['Names'][0].lstrip('/')
+                group, instance_id = instance_name.split('_')
+                macvlan = container['NetworkSettings']['Networks']['macvlan']
+                addr = macvlan['IPAMConfig']['IPv4Address']
+                host = node[0]
+
+                if group not in groups:
+                    groups[group] = {}
+                    groups[group]['type'] = 'memcached'
+                    groups[group]['name'] = ''
+                    groups[group]['instances'] = {}
+
+                groups[group]['instances'][instance_id] = {
+                    'addr': addr + ':3301',
+                    'host': host
+                }
+
+
+        return groups
+
+    def heal_group(self, group, blueprints, allocations, emergent_states):
+        # clean up "lost" containers
+        if group in emergent_states and \
+           group not in blueprints:
+            state = emergent_states[group]
+            for instance_id in state['instances']:
+                instance = state['instances'][instance_id]
+                host = instance['host']
+
+                docker_obj = docker.Client(base_url=host+':2375')
+                docker_obj.stop(container=group+'_'+instance_id)
+                docker_obj.remove_container(container=group+'_'+instance_id)
+
+            # also clean up service registrations
+            if group in allocations:
+                alloc = allocations[group]
+                for instance_id in alloc['instances']:
+                    instance = alloc['instances'][instance_id]
+                    host = instance['host']
+                    consul_obj = consul.Consul(host=host)
+                    consul_obj.agent.service.deregister(group+'_'+instance_id)
+            return True
+
+        # allocate groups that don't exist
+        if group in blueprints and \
+           group not in allocations:
+            alloc = self.allocate_group(group, blueprints[group])
+
+            # if there were any existing states, they must be destroyed
+            if group in emergent_states:
+                state = emergent_states[group]
+                for instance_id in state['instances']:
+                    instance = state['instances'][instance_id]
+                    host = instance['host']
+
+                    docker_obj = docker.Client(base_url=host+':2375')
+                    docker_obj.stop(container=group+'_'+instance_id)
+                    docker_obj.remove_container(container=group+'_'+instance_id)
+
+            self.run_group(group, alloc)
+            return True
+
+        # find out all instances in this group
+        blueprint_instances = blueprints[group]['instances'].keys()
+
+        try:
+            allocation_instances = allocations[group]['instances'].keys()
+        except:
+            allocation_instances = []
+
+        try:
+            emergent_instances = emergent_states[group]['instances'].keys()
+        except:
+            emergent_instances = []
+
+        instances = list(set(blueprint_instances +
+                             allocation_instances +
+                             emergent_instances))
+
+        for instance_id in instances:
+            # if there is a running container and no allocation, kill the
+            # container, reallocate and recreate it
+            if instance_id in emergent_instances and \
+               instance_id not in allocation_instances:
+                instance = emergent_states[group]['instances'][instance_id]
+                host = instance['host']
+
+                docker_obj = docker.Client(base_url=host)
+                docker_obj.stop(container=group+'_'+instance_id)
+                docker_obj.remove_container(container=group+'_'+instance_id)
+
+                alloc = self.allocate_instance(group,
+                                               blueprints[group],
+                                               allocations[group],
+                                               instance_id)
+
+                # if we got here, it means other instance is allocated
+                combined_allocation = allocations[group].copy()
+                combined_allocation['instances'][instance_id] = alloc
+                self.run_instance(group,
+                                  combined_allocation,
+                                  instance_id)
+                return True
+
+            # if instance is allocated, but not running, then create it
+            if instance_id in allocation_instances and \
+               instance_id not in emergent_instances:
+
+                instance = allocations[group]['instances'][instance_id]
+
+                self.run_instance(group,
+                                  allocations[group],
+                                  instance_id)
+
+                return True
+
+            # if there is a blueprint, but no allocation, allocate and create it
+            if instance_id not in allocation_instances:
+                alloc = self.allocate_instance(group,
+                                               blueprints[group],
+                                               allocations[group],
+                                               instance_id)
+
+                # if we got here, it means other instance is allocated
+                combined_allocation = allocations[group].copy()
+                combined_allocation['instances'][instance_id] = alloc
+                self.run_instance(group,
+                                  combined_allocation,
+                                  instance_id)
+                return True
+
+
+
+
+
+            allocation = allocations[group]['instances'][instance_id]
+            emergent = emergent_states[group]['instances'][instance_id]
+
+            # if instance is located on different host than expected,
+            # it should be removed and recreated
+            if allocation['host'] != emergent['host']:
+                docker_obj = docker.Client(base_url=emergent['host'])
+                docker_obj.stop(container=group+'_'+instance_id)
+                docker_obj.remove_container(container=group+'_'+instance_id)
+
+                self.run_instance(group,
+                                  allocations[group],
+                                  instance_id)
+
+                return True
+
+            # failed instances must be destroyed and re-allocated
+            if allocation['status'] not in ('success', 'warning'):
+                docker_obj = docker.Client(base_url=emergent['host']+':2375')
+                docker_obj.stop(container=group+'_'+instance_id)
+                docker_obj.remove_container(container=group+'_'+instance_id)
+
+                consul_obj = consul.Consul(host=allocation['host'])
+                consul_obj.agent.service.deregister(group+'_'+instance_id)
+
+                alloc = self.allocate_instance(group,
+                                               blueprints[group],
+                                               allocations[group],
+                                               instance_id)
+
+                # if we got here, it means other instance is allocated
+                combined_allocation = allocations[group].copy()
+                combined_allocation['instances'][instance_id] = alloc
+                self.run_instance(group,
+                                  combined_allocation,
+                                  instance_id)
+
+                return True
+
+        return False
+
+
+    def heal_groups(self, blueprints, allocations, emergent_states):
+        groups = set()
+
+        for group in blueprints.keys() + \
+            allocations.keys() + \
+            emergent_states.keys():
+            groups.add(group)
+
+        for group in groups:
+            self.heal_group(group, blueprints, allocations, emergent_states)
+
+
+    def allocate_group(self, group, blueprint):
         healthy_nodes = self.get_healthy_docker_nodes()
         if len(healthy_nodes) >= 2:
             pick = random.sample(healthy_nodes, 2)
@@ -235,47 +538,109 @@ class Api(object):
             pick = healthy_nodes * 2
         else:
             raise RuntimeError("There are no healthy docker nodes")
-        consul1_host, docker1_host = pick[0]
-        consul2_host, docker2_host = pick[1]
-        docker1 = docker.Client(base_url=docker1_host)
-        docker2 = docker.Client(base_url=docker2_host)
-        consul1 = consul.Consul(host=consul1_host)
-        consul2 = consul.Consul(host=consul2_host)
+
+        name = blueprint['name']
+        instance_type = blueprint['type']
+
+        result = {'name': name, 'type': instance_type, 'instances': {}}
+
+        for i, instance_id in enumerate(blueprint['instances']):
+            consul_host = pick[i][0]
+            instance = blueprint['instances'][instance_id]
+            addr = instance['addr']
+
+            self.register_tarantool_service(consul_host, addr,
+                                            group+'_'+instance_id, name)
+
+            result['instances'][instance_id] = {
+                'host': consul_host,
+                'addr': addr
+            }
+        return result
+
+    def allocate_instance(self, group, blueprint, allocation, instance_id):
+        other_instance_id = [i for i in allocation['instances']
+                             if i != instance_id][0]
+        other_instance = allocation['instances'][other_instance_id]
+
+        healthy_nodes = self.get_healthy_docker_nodes()
+        nodes_to_pick = [n for n in healthy_nodes if n[0] != other_instance['host']]
+
+        pick = random.choice(nodes_to_pick)
+
+        consul_host = pick[0]
+        instance = blueprint['instances'][instance_id]
+        addr = instance['addr']
+        name = blueprint['name']
+
+        self.register_tarantool_service(consul_host, addr,
+                                        group+'_'+instance_id, name)
+
+        return {
+            'host': consul_host,
+            'addr': addr
+        }
+
+
+    def run_group(self, group, allocation):
+        name = allocation['name']
+
+        instance_ids = allocation['instances'].keys()
+
+        for i, instance_id in enumerate(allocation['instances']):
+            instance = allocation['instances'][instance_id]
+            other_instance = allocation['instances'][instance_ids[1-i]]
+
+            host = instance['host']
+
+            if i == 0:
+                self.create_memcached(host,
+                                      group+'_'+instance_id,
+                                      instance['addr'].split(':')[0],
+                                      None)
+            else:
+                self.create_memcached(host,
+                                      group+'_'+instance_id,
+                                      instance['addr'],
+                                      other_instance['addr'].split(':')[0])
+
+    def run_instance(self, group, allocation, instance_id):
+        other_instance_id = [i for i in allocation['instances']
+                             if i != instance_id][0]
+
+        instance = allocation['instances'][instance_id]
+        other_instance = allocation['instances'][other_instance_id]
+        host = instance['host']
+
+        self.create_memcached(host,
+                              group+'_'+instance_id,
+                              instance['addr'].split(':')[0],
+                              other_instance['addr'].split(':')[0])
+
+
+
+
+    def create_memcached_pair(self, name):
+        pair_id = self.generate_id()
 
         ip1 = self.allocate_ip()
         ip2 = self.allocate_ip(skip=[ip1])
 
         self.create_memcached_blueprint(pair_id, name, ip1, ip2)
 
-        instance1 = self.create_memcached(docker1, pair_id+'_1', ip1, None)
-        instance2 = self.create_memcached(docker2, pair_id+'_2', ip2, ip1)
+        blueprints = self.get_blueprints()
+        allocations = self.get_allocations()
+        emergent_states = self.get_emergent_state()
+        self.heal_groups(blueprints, allocations, emergent_states)
 
-        timeout = time.time() + 10
-        connection_success = False
-        while time.time() < timeout:
-            try:
-                tarantool.Connection(ip1, 3302)
-                tarantool.Connection(ip2, 3302)
-                connection_success = True
-                break
-            except tarantool.error.NetworkError:
-                pass
-            time.sleep(0.5)
-
-        if not connection_success:
-            raise RuntimeError("Failed to connect to the created instances")
-
-        self.register_tarantool_service(consul1, docker1, instance1, name)
-        self.register_tarantool_service(consul2, docker2, instance2, name)
-
-        self.enable_memcached_replication(ip1+':3301', ip2+':3301')
+        #self.enable_memcached_replication(ip1+':3301', ip2+':3301')
 
         return pair_id
 
     def delete_memcached_pair(self, pair_id):
         kv = self.consul.kv
 
-        instance_type =  kv.get("tarantool/%s/type" % pair_id)
+        instance_type = kv.get("tarantool/%s/type" % pair_id)
 
         if instance_type[1] == None:
             raise RuntimeError("Pair '%s' doesn't exist" % pair_id)
@@ -284,22 +649,21 @@ class Api(object):
         instance2 = pair_id + '_2'
 
         consul1_host, docker1_host = \
-            self.locate_tarantool_service(self.consul, instance1)
+            self.locate_tarantool_service(instance1)
         consul2_host, docker2_host = \
-            self.locate_tarantool_service(self.consul, instance2)
+            self.locate_tarantool_service(instance2)
 
         if consul1_host and docker1_host:
             consul1 = consul.Consul(host=consul1_host)
             docker1 = docker.Client(base_url=docker1_host)
-            self.unregister_tarantool_service(consul1, docker1, instance1)
-            self.delete_tarantool_service(consul1, docker1, instance1)
+            self.delete_container(instance1)
+            self.unregister_tarantool_service(instance1)
 
         if consul2_host and docker2_host:
             consul2 = consul.Consul(host=consul2_host)
             docker2 = docker.Client(base_url=docker2_host)
-            self.unregister_tarantool_service(consul2, docker2, instance2)
-            self.delete_tarantool_service(consul2, docker2, instance2)
-
+            self.delete_container(instance2)
+            self.unregister_tarantool_service(instance2)
 
         kv.delete("tarantool/%s" % pair_id, recurse=True)
 
@@ -406,10 +770,13 @@ class Api(object):
             raise RuntimeError("Failed to enable replication on '%s'" % memcached2)
 
 
+
     def failover_instance(self, pair_id):
         pairs = self.list_memcached_pairs()
 
         pair = [i for i in pairs if i['group'] == pair_id]
+
+        print pair
 
         assert(len(pair) == 2)
 
@@ -420,22 +787,27 @@ class Api(object):
 
             instance_id = pair[idx]['group'] + '_' + pair[idx]['instance']
             consul_host, docker_host = self.locate_tarantool_service(
-                self.consul, instance_id)
+                instance_id)
+
+            healthy_nodes = self.get_healthy_docker_nodes()
+            nodes_to_pick = [n for n in healthy_nodes if n[0] != pair[idx]['node']]
+            pick = random.choice(nodes_to_pick)
+
+            logging.info("Replacing failed node '%s' with a new node on '%s'",
+                         pair[idx]['addr'].split(':')[0],
+                         pick[0])
 
             if consul_host and docker_host:
                 consul_obj = consul.Consul(host=consul_host)
                 docker_obj = docker.Client(base_url=docker_host)
 
                 try:
-                    self.delete_tarantool_service(consul_obj, docker_obj, instance_id)
+                    self.delete_container(instance_id)
                 except:
                     pass
 
-                self.unregister_tarantool_service(consul_obj, docker_obj, instance_id)
+                self.unregister_tarantool_service(instance_id)
 
-            healthy_nodes = self.get_healthy_docker_nodes()
-            nodes_to_pick = [n for n in healthy_nodes if n[0] != pair[idx]['node']]
-            pick = random.choice(nodes_to_pick)
 
             consul_host, docker_host = pick
             docker_obj = docker.Client(base_url=docker_host)
@@ -451,3 +823,9 @@ class Api(object):
                                             instance_id, "")
         #self.enable_memcached_replication(matching_pair[0]['addr'],
         #                                  matching_pair[1]['addr'])
+
+    def heal(self):
+        blueprints = self.get_blueprints()
+        allocations = self.get_allocations()
+        emergent_states = self.get_emergent_state()
+        self.heal_groups(blueprints, allocations, emergent_states)

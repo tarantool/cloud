@@ -4,6 +4,7 @@ import argparse
 import api
 import os
 import sys
+import logging
 
 def create_instance(host, name):
     a = api.Api(host)
@@ -28,7 +29,6 @@ def print_table(header, data):
     print fmt.format(*[c[1] for c in header])
     for entry in data:
         print fmt.format(*[entry[c[0]] for c in header])
-
 
 def list_instances(host, quiet = False):
     a = api.Api(host)
@@ -60,9 +60,12 @@ def failover_instances(host, instances):
     for instance in instances:
         a.failover_instance(instance)
 
-
+def heal(host):
+    a = api.Api(host)
+    a.heal()
 
 def main():
+    logging.basicConfig(format='%(levelname)s: %(message)s',level=logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument('-H', '--host', default = None)
     subparsers = parser.add_subparsers(dest="subparser_name")
@@ -74,6 +77,7 @@ def main():
     rm_parser.add_argument('instance_id', nargs='+')
     failover_parser = subparsers.add_parser('failover')
     failover_parser.add_argument('instance_id', nargs='*')
+    heal_parser = subparsers.add_parser('heal')
 
     args = parser.parse_args()
 
@@ -93,7 +97,8 @@ def main():
         delete_instance(host, args.instance_id)
     elif args.subparser_name == 'failover':
         failover_instances(host, args.instance_id)
-
+    elif args.subparser_name == 'heal':
+        heal(host)
 
 
 if __name__ == '__main__':
