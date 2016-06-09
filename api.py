@@ -361,7 +361,8 @@ class Api(object):
 
         return groups
 
-    def heal_group(self, group, blueprints, allocations, emergent_states):
+    def cleanup_lost_containers(self, group, blueprints,
+                                allocations, emergent_states):
         # clean up "lost" containers
         if group in emergent_states and \
            group not in blueprints:
@@ -384,6 +385,10 @@ class Api(object):
                     consul_obj.agent.service.deregister(group+'_'+instance_id)
             return True
 
+        return False
+
+    def allocate_non_existing_groups(self, group, blueprints,
+                                     allocations, emergent_states):
         # allocate groups that don't exist
         if group in blueprints and \
            group not in allocations:
@@ -402,6 +407,136 @@ class Api(object):
 
             self.run_group(group, alloc)
             return True
+        return False
+
+    def recreate_missing_allocation(self, group, blueprints,
+                                     allocations, emergent_states):
+
+        blueprint_instances = blueprints[group]['instances'].keys()
+
+        try:
+            allocation_instances = allocations[group]['instances'].keys()
+        except:
+            allocation_instances = []
+
+        try:
+            emergent_instances = emergent_states[group]['instances'].keys()
+        except:
+            emergent_instances = []
+
+        for instance_id in blueprint_instances:
+            # if there is a running container and no allocation, kill the
+            # container, reallocate and recreate it
+            if instance_id not in allocation_instances:
+                if instance_id in emergent_instances:
+                    instance = emergent_states[group]['instances'][instance_id]
+                    host = instance['host']
+
+                    docker_obj = docker.Client(base_url=host+':2375')
+                    docker_obj.stop(container=group+'_'+instance_id)
+                    docker_obj.remove_container(container=group+'_'+instance_id)
+
+                alloc = self.allocate_instance(group,
+                                               blueprints[group],
+                                               allocations[group],
+                                               instance_id)
+
+                # if we got here, it means other instance is allocated
+                combined_allocation = allocations[group].copy()
+                combined_allocation['instances'][instance_id] = alloc
+                self.run_instance(group,
+                                  combined_allocation,
+                                  instance_id)
+                return True
+
+        return False
+
+    def rerun_missing_instance(self, group, blueprints,
+                                     allocations, emergent_states):
+        blueprint_instances = blueprints[group]['instances'].keys()
+
+        try:
+            allocation_instances = allocations[group]['instances'].keys()
+        except:
+            allocation_instances = []
+
+        try:
+            emergent_instances = emergent_states[group]['instances'].keys()
+        except:
+            emergent_instances = []
+
+
+        for instance_id in blueprint_instances:
+            # if there is a running container and no allocation, kill the
+            # container, reallocate and recreate it
+            if instance_id in allocation_instances and \
+               instance_id not in emergent_instances:
+                self.run_instance(group,
+                                  allocations[group],
+                                  instance_id)
+
+                return True
+
+        return False
+
+    def migrate_instance_to_correct_host(self, group, blueprints,
+                                         allocations, emergent_states):
+        try:
+            allocation_instances = allocations[group]['instances'].keys()
+        except:
+            allocation_instances = []
+
+        try:
+            emergent_instances = emergent_states[group]['instances'].keys()
+        except:
+            emergent_instances = []
+
+        for instance_id in allocation_instances:
+            if instance_id in emergent_instances:
+                # if instance is located on different host than expected,
+                # it should be removed and recreated
+                allocation = allocations[group]['instances'][instance_id]
+                emergent = emergent_states[group]['instances'][instance_id]
+
+                if allocation['host'] != emergent['host']:
+                    docker_obj = docker.Client(base_url=emergent['host']+':2375')
+                    docker_obj.stop(container=group+'_'+instance_id)
+                    docker_obj.remove_container(container=group+'_'+instance_id)
+
+                    self.run_instance(group,
+                                      allocations[group],
+                                      instance_id)
+
+                    return True
+        return False
+
+    def heal_group(self, group, blueprints, allocations, emergent_states):
+
+        result = self.cleanup_lost_containers(group, blueprints,
+                                              allocations, emergent_states)
+        if result:
+            return True
+
+        result = self.allocate_non_existing_groups(group, blueprints,
+                                                   allocations, emergent_states)
+        if result:
+            return True
+
+        result = self.recreate_missing_allocation(group, blueprints,
+                                                   allocations, emergent_states)
+        if result:
+            return True
+
+        result = self.rerun_missing_instance(group, blueprints,
+                                                   allocations, emergent_states)
+        if result:
+            return True
+
+        result = self.migrate_instance_to_correct_host(group, blueprints,
+                                                       allocations, emergent_states)
+        if result:
+            return True
+
 
         # find out all instances in this group
         blueprint_instances = blueprints[group]['instances'].keys()
@@ -421,76 +556,9 @@ class Api(object):
                              emergent_instances))
 
         for instance_id in instances:
-            # if there is a running container and no allocation, kill the
-            # container, reallocate and recreate it
-            if instance_id in emergent_instances and \
-               instance_id not in allocation_instances:
-                instance = emergent_states[group]['instances'][instance_id]
-                host = instance['host']
-
-                docker_obj = docker.Client(base_url=host)
-                docker_obj.stop(container=group+'_'+instance_id)
-                docker_obj.remove_container(container=group+'_'+instance_id)
-
-                alloc = self.allocate_instance(group,
-                                               blueprints[group],
-                                               allocations[group],
-                                               instance_id)
-
-                # if we got here, it means other instance is allocated
-                combined_allocation = allocations[group].copy()
-                combined_allocation['instances'][instance_id] = alloc
-                self.run_instance(group,
-                                  combined_allocation,
-                                  instance_id)
-                return True
-
-            # if instance is allocated, but not running, then create it
-            if instance_id in allocation_instances and \
-               instance_id not in emergent_instances:
-
-                instance = allocations[group]['instances'][instance_id]
-
-                self.run_instance(group,
-                                  allocations[group],
-                                  instance_id)
-
-                return True
-
-            # if there is a blueprint, but no allocation, allocate and create it
-            if instance_id not in allocation_instances:
-                alloc = self.allocate_instance(group,
-                                               blueprints[group],
-                                               allocations[group],
-                                               instance_id)
-
-                # if we got here, it means other instance is allocated
-                combined_allocation = allocations[group].copy()
-                combined_allocation['instances'][instance_id] = alloc
-                self.run_instance(group,
-                                  combined_allocation,
-                                  instance_id)
-                return True
-
-
-
-
-
             allocation = allocations[group]['instances'][instance_id]
             emergent = emergent_states[group]['instances'][instance_id]
 
-            # if instance is located on different host than expected,
-            # it should be removed and recreated
-            if allocation['host'] != emergent['host']:
-                docker_obj = docker.Client(base_url=emergent['host'])
-                docker_obj.stop(container=group+'_'+instance_id)
-                docker_obj.remove_container(container=group+'_'+instance_id)
-
-                self.run_instance(group,
-                                  allocations[group],
-                                  instance_id)
-
-                return True
 
             # failed instances must be destroyed and re-allocated
             if allocation['status'] not in ('success', 'warning'):

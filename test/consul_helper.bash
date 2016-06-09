@@ -54,7 +54,7 @@ for entry in health:
     addr = entry['Service']['Address'] or entry['Node']['Address']
     port = entry['Service']['Port']
 
-    result.append(addr+':'+str(port))
+    result.append(addr)
 
 print "\n".join(result)
 EOF
@@ -103,4 +103,24 @@ if agent_addr:
     c = consul.Consul(host=agent_addr)
     c.agent.service.deregister("$service_id")
 EOF
+}
+
+consul_register_service()
+{
+    consul_host=$1
+    service_name=$2
+    service_id=$3
+    ip_addr=$4
+    port=$5
+
+    python <<-EOF
+import consul
+c = consul.Consul(host="$consul_host")
+
+ret = c.agent.service.register("$service_name",
+                               service_id="$service_id",
+                               address="$ip_addr",
+                               port=int("$port"))
+EOF
+
 }

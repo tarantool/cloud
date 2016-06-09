@@ -22,3 +22,14 @@ docker_delete_instance()
     docker -H "$docker_host" stop $instance_id > /dev/null || true
     docker -H "$docker_host" rm $instance_id > /dev/null || true
 }
+
+docker_get_container_id()
+{
+    docker_host=$1
+    instance_id=$2
+
+    id=$(docker -H "$docker_host" inspect --format="{{.Id}}" "$instance_id" 2>/dev/null || true)
+    if [ ! -z "$id" ]; then
+        echo $id
+    fi
+}
