@@ -555,38 +555,20 @@ class Api(object):
 
     def heal_group(self, group, blueprints, allocations, emergent_states):
 
-        result = self.cleanup_lost_containers(group, blueprints,
-                                              allocations, emergent_states)
-        if result:
-            return True
+        healing_functions = [
+            self.cleanup_lost_containers,
+            self.allocate_non_existing_groups,
+            self.recreate_missing_allocation,
+            self.rerun_missing_instance,
+            self.migrate_instance_to_correct_host,
+            self.recreate_and_reallocate_failed_instance
+        ]
 
-        result = self.allocate_non_existing_groups(group, blueprints,
-                                                   allocations, emergent_states)
-        if result:
-            return True
-
-        result = self.recreate_missing_allocation(group, blueprints,
-                                                   allocations, emergent_states)
-        if result:
-            return True
-
-        result = self.rerun_missing_instance(group, blueprints,
-                                             allocations,
-                                             emergent_states)
-        if result:
-            return True
-
-        result = self.migrate_instance_to_correct_host(group, blueprints,
-                                                       allocations,
-                                                       emergent_states)
-        if result:
-            return True
-
-        result = self.recreate_and_reallocate_failed_instance(group, blueprints,
-                                                              allocations,
-                                                              emergent_states)
-        if result:
-            return True
+        for function in healing_functions:
+            result = function(group, blueprints,
+                              allocations, emergent_states)
+            if result:
+                return True
 
         return False
 
