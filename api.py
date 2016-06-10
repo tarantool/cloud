@@ -102,11 +102,12 @@ class Api(object):
         for line in result:
             print line
 
-    def create_memcached_blueprint(self, pair_id, name, ip1, ip2):
+    def create_memcached_blueprint(self, pair_id, name, ip1, ip2, check_period):
         kv = self.consul.kv
 
         kv.put('tarantool/%s/type' % pair_id, 'memcached')
         kv.put('tarantool/%s/name' % pair_id, name)
+        kv.put('tarantool/%s/check_period' % pair_id, str(check_period))
         kv.put('tarantool/%s/instances/1' % pair_id, ip1)
         kv.put('tarantool/%s/instances/2' % pair_id, ip2)
 
@@ -191,14 +192,14 @@ class Api(object):
         docker_obj.stop(container=instance_id)
         docker_obj.remove_container(container=instance_id)
 
-    def register_tarantool_service(self, consul_host, ipaddr, instance_id, name):
+    def register_tarantool_service(self, consul_host, ipaddr, instance_id, name, check_period):
         consul_obj = consul.Consul(host=consul_host)
         #check = consul.Check.http("http://%s:8080/ping" % ipaddr, "10s")
         check = {
             'docker_container_id': instance_id,
             'shell': "/bin/bash",
             'script': "/var/lib/mon.d/tarantool_replication.sh",
-            'interval': "10s",
+            'interval': "%ds" % check_period,
             'status' : 'warning'
         }
 
@@ -265,6 +266,10 @@ class Api(object):
             match = re.match('tarantool/(.*)/name', entry['Key'])
             if match:
                 groups[match.group(1)]['name'] = entry['Value']
+
+            match = re.match('tarantool/(.*)/check_period', entry['Key'])
+            if match:
+                groups[match.group(1)]['check_period'] = int(entry['Value'])
 
             match = re.match('tarantool/(.*)/instances/(.*)', entry['Key'])
             if match:
@@ -510,52 +515,14 @@ class Api(object):
                     return True
         return False
 
-    def heal_group(self, group, blueprints, allocations, emergent_states):
-
-        result = self.cleanup_lost_containers(group, blueprints,
-                                              allocations, emergent_states)
-        if result:
-            return True
-
-        result = self.allocate_non_existing_groups(group, blueprints,
-                                                   allocations, emergent_states)
-        if result:
-            return True
-
-        result = self.recreate_missing_allocation(group, blueprints,
-                                                   allocations, emergent_states)
-        if result:
-            return True
-
-        result = self.rerun_missing_instance(group, blueprints,
-                                                   allocations, emergent_states)
-        if result:
-            return True
-
-        result = self.migrate_instance_to_correct_host(group, blueprints,
-                                                       allocations, emergent_states)
-        if result:
-            return True
-
-
-        # find out all instances in this group
-        blueprint_instances = blueprints[group]['instances'].keys()
-
-        try:
-            allocation_instances = allocations[group]['instances'].keys()
-        except:
-            allocation_instances = []
-
+    def recreate_and_reallocate_failed_instance(self, group, blueprints,
+                                                allocations, emergent_states):
         try:
             emergent_instances = emergent_states[group]['instances'].keys()
         except:
             emergent_instances = []
 
-        instances = list(set(blueprint_instances +
-                             allocation_instances +
-                             emergent_instances))
-
-        for instance_id in instances:
+        for instance_id in emergent_instances:
             allocation = allocations[group]['instances'][instance_id]
             emergent = emergent_states[group]['instances'][instance_id]
 
@@ -582,6 +549,44 @@ class Api(object):
                                   instance_id)
 
                 return True
+
+        return False
+
+
+    def heal_group(self, group, blueprints, allocations, emergent_states):
+
+        result = self.cleanup_lost_containers(group, blueprints,
+                                              allocations, emergent_states)
+        if result:
+            return True
+
+        result = self.allocate_non_existing_groups(group, blueprints,
+                                                   allocations, emergent_states)
+        if result:
+            return True
+
+        result = self.recreate_missing_allocation(group, blueprints,
+                                                   allocations, emergent_states)
+        if result:
+            return True
+
+        result = self.rerun_missing_instance(group, blueprints,
+                                             allocations,
+                                             emergent_states)
+        if result:
+            return True
+
+        result = self.migrate_instance_to_correct_host(group, blueprints,
+                                                       allocations,
+                                                       emergent_states)
+        if result:
+            return True
+
+        result = self.recreate_and_reallocate_failed_instance(group, blueprints,
+                                                              allocations,
+                                                              emergent_states)
+        if result:
+            return True
 
         return False
 
@@ -618,7 +623,8 @@ class Api(object):
             addr = instance['addr']
 
             self.register_tarantool_service(consul_host, addr,
-                                            group+'_'+instance_id, name)
+                                            group+'_'+instance_id, name,
+                                            blueprint['check_period'])
 
             result['instances'][instance_id] = {
                 'host': consul_host,
@@ -642,7 +648,8 @@ class Api(object):
         name = blueprint['name']
 
         self.register_tarantool_service(consul_host, addr,
-                                        group+'_'+instance_id, name)
+                                        group+'_'+instance_id, name,
+                                        blueprint['check_period'])
 
         return {
             'host': consul_host,
@@ -688,13 +695,13 @@ class Api(object):
 
 
 
-    def create_memcached_pair(self, name):
+    def create_memcached_pair(self, name, check_period):
         pair_id = self.generate_id()
 
         ip1 = self.allocate_ip()
         ip2 = self.allocate_ip(skip=[ip1])
 
-        self.create_memcached_blueprint(pair_id, name, ip1, ip2)
+        self.create_memcached_blueprint(pair_id, name, ip1, ip2, check_period)
 
         blueprints = self.get_blueprints()
         allocations = self.get_allocations()
@@ -888,7 +895,9 @@ class Api(object):
 
             self.register_tarantool_service(consul_obj,
                                             docker_obj,
-                                            instance_id, "")
+                                            instance_id,
+                                            "",
+                                            10)
         #self.enable_memcached_replication(matching_pair[0]['addr'],
         #                                  matching_pair[1]['addr'])
 
@@ -897,3 +906,39 @@ class Api(object):
         allocations = self.get_allocations()
         emergent_states = self.get_emergent_state()
         self.heal_groups(blueprints, allocations, emergent_states)
+
+    def wait_instance(self, instance_id, passing, warning, critical):
+        expected_statuses = []
+        if passing:
+            expected_statuses += ["passing"]
+
+        if warning:
+            expected_statuses += ["warning"]
+
+        if critical:
+            expected_statuses += ["critical"]
+
+
+        while True:
+            health = self.consul.health.service("memcached")[1]
+
+            for entry in health:
+                if entry['Service']['ID'] == instance_id:
+                    statuses = [check['Status'] for check in entry['Checks']]
+                    status = combine_consul_statuses(statuses)
+
+                    if status in expected_statuses:
+                        return
+            time.sleep(0.5)
+
+
+
+
+
+    def wait_group(self, group_id, passing, warning, critical):
+        blueprints = self.get_blueprints()
+
+        blueprint = blueprints[group_id]
+
+        for instance in blueprint['instances']:
+            self.wait_instance(group_id+'_'+instance, passing, warning, critical)

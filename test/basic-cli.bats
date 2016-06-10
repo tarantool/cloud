@@ -219,22 +219,16 @@ teardown()
 
     host=$(get_docker_host "${id}_1")
 
-    echo "Containers: ${docker_host_array[@]}"
-    echo "Current host: $host"
-
     host_idx=0
     # find out the index of current docker host in array
     for i in "${!docker_host_array[@]}"; do
         if [[ "${docker_host_array[$i]}" = "${host}" ]]; then
             host_idx=$i
-            echo "Index of host: $i"
         fi
     done
 
     new_host_idx=$(bc <<< "($host_idx + 1) % $num_docker_hosts" )
     new_host="${docker_host_array[$new_host_idx]}"
-    echo "New idx: $new_host_idx"
-    echo "New host: $new_host"
 
     consul_delete_service $CONSUL_HOST memcached "${id}_1"
 
@@ -249,4 +243,30 @@ teardown()
     host_check=$(get_docker_host "${id}_1")
 
     [ "$host_check" == "$new_host" ]
+}
+
+@test "recreate failing container" {
+    id=$(./cli.py run --check-period 1 foobar|tail -1)
+
+    ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
+    cid=$(get_container_id "${id}_1")
+
+    host=$(get_docker_host "${id}_1")
+
+    docker -H $host:2375 stop "${id}_1"
+
+    ./cli.py wait --critical "${id}_1"
+
+    ! ping -t1 -c1 $ip
+
+    ./cli.py heal
+
+    ./cli.py wait --warning --passing "${id}_1"
+
+    cid_new=$(get_container_id "${id}_1")
+
+    ping -t1 -c1 $ip
+
+    [ "$cid" != "$cid_new" ]
+
 }

@@ -6,9 +6,9 @@ import os
 import sys
 import logging
 
-def create_instance(host, name):
+def create_instance(host, name, check_period):
     a = api.Api(host)
-    instance_id = a.create_memcached_pair(name)
+    instance_id = a.create_memcached_pair(name, check_period)
 
     print instance_id
 
@@ -64,6 +64,14 @@ def heal(host):
     a = api.Api(host)
     a.heal()
 
+def wait(host, instance_or_group_id, passing, warning, critical):
+    a = api.Api(host)
+    if '_' in instance_or_group_id:
+        a.wait_instance(instance_or_group_id, passing, warning, critical)
+    else:
+        a.wait_group(instance_or_group_id, passing, warning, critical)
+
+
 def main():
     logging.basicConfig(format='%(levelname)s: %(message)s',level=logging.INFO)
     parser = argparse.ArgumentParser()
@@ -72,12 +80,18 @@ def main():
     ps_parser = subparsers.add_parser('ps')
     ps_parser.add_argument('-q', '--quiet', action='store_true')
     run_parser = subparsers.add_parser('run')
+    run_parser.add_argument('--check-period', '-p', type=int, default=10)
     run_parser.add_argument('name')
     rm_parser = subparsers.add_parser('rm')
     rm_parser.add_argument('instance_id', nargs='+')
     failover_parser = subparsers.add_parser('failover')
     failover_parser.add_argument('instance_id', nargs='*')
     heal_parser = subparsers.add_parser('heal')
+    wait_parser = subparsers.add_parser('wait')
+    wait_parser.add_argument('--passing', action='store_true', default=False)
+    wait_parser.add_argument('--warning', action='store_true', default=False)
+    wait_parser.add_argument('--critical', action='store_true', default=False)
+    wait_parser.add_argument('instance_or_group_id')
 
     args = parser.parse_args()
 
@@ -92,13 +106,15 @@ def main():
     if args.subparser_name == 'ps':
         list_instances(host, args.quiet)
     elif args.subparser_name == 'run':
-        create_instance(host, args.name)
+        create_instance(host, args.name, args.check_period)
     elif args.subparser_name == 'rm':
         delete_instance(host, args.instance_id)
     elif args.subparser_name == 'failover':
         failover_instances(host, args.instance_id)
     elif args.subparser_name == 'heal':
         heal(host)
+    elif args.subparser_name == 'wait':
+        wait(host, args.instance_or_group_id, args.passing, args.warning, args.critical)
 
 
 if __name__ == '__main__':
