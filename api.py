@@ -114,8 +114,15 @@ class Api(object):
 
     def create_memcached(self, docker_host, instance_id, instance_ip, replica_ip):
         docker_obj = docker.Client(base_url=docker_host+':2375')
-        logging.info("Creating memcached '%s' on '%s' with ip %s",
-                     instance_id, docker_obj.base_url, instance_ip)
+
+        if not replica_ip:
+            logging.info("Creating memcached '%s' on '%s' with ip '%s'",
+                         instance_id, docker_obj.base_url, instance_ip)
+        else:
+            logging.info("Creating memcached '%s' on '%s' with ip '%s'" +
+                         " and replication source: '%s'",
+                         instance_id, docker_obj.base_url, instance_ip, replica_ip)
+
 
         target_app ='/var/lib/tarantool/app.lua'
         src_app = '/opt/tarantool_cloud/app.lua'
@@ -644,9 +651,10 @@ class Api(object):
 
         instance_ids = allocation['instances'].keys()
 
-        for i, instance_id in enumerate(allocation['instances']):
-            instance = allocation['instances'][instance_id]
-            other_instance = allocation['instances'][instance_ids[1-i]]
+        instances = allocation['instances']
+        for i, instance_id in enumerate(instances):
+            instance = instances[instance_id]
+            other_instance = instances[instance_ids[1-i]]
 
             host = instance['host']
 
@@ -655,11 +663,16 @@ class Api(object):
                                       group+'_'+instance_id,
                                       instance['addr'].split(':')[0],
                                       None)
+
             else:
                 self.create_memcached(host,
                                       group+'_'+instance_id,
                                       instance['addr'],
                                       other_instance['addr'].split(':')[0])
+        self.enable_memcached_replication(
+            instances[instance_ids[0]]['addr'],
+            instances[instance_ids[1]]['addr'])
+
 
     def run_instance(self, group, allocation, instance_id):
         other_instance_id = [i for i in allocation['instances']
@@ -797,8 +810,22 @@ class Api(object):
         memc2_host = memcached2.split(':')[0]
         memc2_port = 3302
 
-        memc1 = tarantool.Connection(memc1_host, 3302)
-        memc2 = tarantool.Connection(memc2_host, 3302)
+        logging.info("Enabling replication between '%s' and '%s'",
+                     memc1_host, memc2_host)
+
+        timeout = time.time() + 10
+        while time.time() < timeout:
+            try:
+                memc1 = tarantool.Connection(memc1_host, 3302)
+                memc2 = tarantool.Connection(memc2_host, 3302)
+                break
+            except:
+                pass
+            time.sleep(0.5)
+
+        if time.time() > timeout:
+            raise RuntimeError("Failed to enable replication between '%s' and '%s'" %
+                               (memc1_host, memc2_host))
 
         cmd = "box.cfg{replication_source=\"%s:%d\"}"
 
