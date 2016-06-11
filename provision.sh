@@ -29,7 +29,7 @@ mkdir -p /opt/tarantool_cloud
 cp /vagrant/docker_wrapper.sh /opt/tarantool_cloud/docker_wrapper.sh
 cp -r /vagrant/consul.d /opt/tarantool_cloud
 cp /vagrant/app.lua /opt/tarantool_cloud/app.lua
-cp -r /vagrant/mon.d /opt/tarantool_cloud/mon.d
+cp -r /vagrant/mon.d /opt/tarantool_cloud
 
 cp /vagrant/systemd/consul.service /etc/systemd/system/consul.service
 cp /vagrant/systemd/macvlan-settings.service /etc/systemd/system/macvlan-settings.service

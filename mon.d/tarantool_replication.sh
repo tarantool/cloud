@@ -1,6 +1,6 @@
 #!/bin/bash
 
-replication_status=$(tarantool <<-EOF
+replication_status=$(tarantool <<-'EOF'
 os = require("os")
 netbox = require('net.box')
 conn = netbox.new("localhost:3302")
