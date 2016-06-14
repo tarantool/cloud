@@ -908,3 +908,30 @@ class Api(object):
 
         for instance in blueprint['instances']:
             self.wait_instance(group_id+'_'+instance, passing, warning, critical)
+
+    def watch(self):
+        logging.info("Watching for changes in health")
+        index_old = None
+        while True:
+            index_new, health = self.consul.health.service('memcached',
+                                                           index_old,
+                                                           wait='5m')
+
+            if index_old == index_new:
+                # There is a 5-minute timeout for this to happen
+                # It is quite safe to run healing during such periods
+                logging.info("Running periodic healing")
+                self.heal()
+            else:
+                heal = False
+                for entry in health:
+                    statuses = [check['Status'] for check in entry['Checks']]
+                    status = combine_consul_statuses(statuses)
+
+                    if status == 'critical':
+                        heal = True
+
+                if heal:
+                    self.heal()
+
+            index_old=index_new

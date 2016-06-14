@@ -63,8 +63,8 @@ def wait(host, instance_or_group_id, passing, warning, critical):
         a.wait_group(instance_or_group_id, passing, warning, critical)
 
 def watch(host):
-    while True:
-        time.sleep(1)
+    a = api.Api(host)
+    a.watch()
 
 
 def main():
@@ -109,7 +109,10 @@ def main():
     elif args.subparser_name == 'wait':
         wait(host, args.instance_or_group_id, args.passing, args.warning, args.critical)
     elif args.subparser_name == 'watch':
-        watch(host)
+        try:
+            watch(host)
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == '__main__':
