@@ -5,6 +5,7 @@ import api
 import os
 import sys
 import logging
+import time
 
 def create_instance(host, name, check_period):
     a = api.Api(host)
@@ -71,6 +72,10 @@ def wait(host, instance_or_group_id, passing, warning, critical):
     else:
         a.wait_group(instance_or_group_id, passing, warning, critical)
 
+def watch(host):
+    while True:
+        time.sleep(1)
+
 
 def main():
     logging.basicConfig(format='%(levelname)s: %(message)s',level=logging.INFO)
@@ -92,6 +97,7 @@ def main():
     wait_parser.add_argument('--warning', action='store_true', default=False)
     wait_parser.add_argument('--critical', action='store_true', default=False)
     wait_parser.add_argument('instance_or_group_id')
+    watch_parser = subparsers.add_parser('watch')
 
     args = parser.parse_args()
 
@@ -115,6 +121,8 @@ def main():
         heal(host)
     elif args.subparser_name == 'wait':
         wait(host, args.instance_or_group_id, args.passing, args.warning, args.critical)
+    elif args.subparser_name == 'watch':
+        watch(host)
 
 
 if __name__ == '__main__':
