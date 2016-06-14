@@ -854,61 +854,6 @@ class Api(object):
         if 'follow' not in memc2_repl_status:
             raise RuntimeError("Failed to enable replication on '%s'" % memcached2)
 
-
-
-    def failover_instance(self, pair_id):
-        pairs = self.list_memcached_pairs()
-
-        pair = [i for i in pairs if i['group'] == pair_id]
-
-        assert(len(pair) == 2)
-
-        for idx in range(len(pair)):
-            if pair[idx]['state'] not in ('critical', 'missing'):
-                continue
-            other = len(pair) - idx - 1
-
-            instance_id = pair[idx]['group'] + '_' + pair[idx]['instance']
-            consul_host, docker_host = self.locate_tarantool_service(
-                instance_id)
-
-            healthy_nodes = self.get_healthy_docker_nodes()
-            nodes_to_pick = [n for n in healthy_nodes if n[0] != pair[idx]['node']]
-            pick = random.choice(nodes_to_pick)
-
-            logging.info("Replacing failed node '%s' with a new node on '%s'",
-                         pair[idx]['addr'].split(':')[0],
-                         pick[0])
-
-            if consul_host and docker_host:
-                consul_obj = consul.Consul(host=consul_host)
-                docker_obj = docker.Client(base_url=docker_host)
-
-                try:
-                    self.delete_container(instance_id)
-                except:
-                    pass
-
-                self.unregister_tarantool_service(instance_id)
-
-
-            consul_host, docker_host = pick
-            docker_obj = docker.Client(base_url=docker_host)
-            consul_obj = consul.Consul(host=consul_host)
-
-            self.create_memcached(docker_obj,
-                                  instance_id,
-                                  pair[idx]['addr'].split(':')[0],
-                                  pair[other]['addr'].split(':')[0])
-
-            self.register_tarantool_service(consul_obj,
-                                            docker_obj,
-                                            instance_id,
-                                            "",
-                                            10)
-        #self.enable_memcached_replication(matching_pair[0]['addr'],
-        #                                  matching_pair[1]['addr'])
-
     def heal(self):
         blueprints = self.get_blueprints()
         allocations = self.get_allocations()
