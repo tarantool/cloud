@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
 import api
@@ -11,7 +11,7 @@ def create_instance(host, name, check_period):
     a = api.Api(host)
     instance_id = a.create_memcached_pair(name, check_period)
 
-    print instance_id
+    print(instance_id)
 
 def delete_instance(host, instances):
     a = api.Api(host)
@@ -25,11 +25,11 @@ def print_table(header, data):
         maxlen = max([len(d[field[0]])+1 for d in data] + [len(field[1]) + 4])
         lengths[idx] = maxlen
 
-    fmt = " ".join('{:<%d}'%l for l in lengths)
+    fmt = " ".join('{!s:<%d}'%l for l in lengths)
 
-    print fmt.format(*[c[1] for c in header])
+    print(fmt.format(*[c[1] for c in header]))
     for entry in data:
-        print fmt.format(*[entry[c[0]] for c in header])
+        print(fmt.format(*[entry[c[0]] for c in header]))
 
 def list_instances(host, quiet = False):
     a = api.Api(host)
@@ -49,7 +49,7 @@ def list_instances(host, quiet = False):
         print_table(header, instances)
     else:
         groups = set([i['group'] for i in instances])
-        print '\n'.join(groups)
+        print('\n'.join(groups))
 
 def failover_instances(host, instances):
     a = api.Api(host)

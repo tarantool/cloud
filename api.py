@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import os
 import re
@@ -95,12 +95,13 @@ class Api(object):
             if image['RepoTags'][0] == image_name:
                 return
 
-        print "Image '%s' not found on '%s'. Building." % (image_name, docker.base_url)
+        logging.info("Image '%s' not found on '%s'. Building.",
+                     image_name, docker.base_url)
 
         result = docker.pull(image_name, stream=True)
 
         for line in result:
-            print line
+            logging.info(line)
 
     def create_memcached_blueprint(self, pair_id, name, ip1, ip2, check_period):
         kv = self.consul.kv
@@ -266,13 +267,13 @@ class Api(object):
         for entry in tarantool_kv:
             match = re.match('tarantool/(.*)/type', entry['Key'])
             if match:
-                groups[match.group(1)] = {'type': entry['Value'],
+                groups[match.group(1)] = {'type': entry['Value'].decode("ascii"),
                                           'instances': {}}
 
         for entry in tarantool_kv:
             match = re.match('tarantool/(.*)/name', entry['Key'])
             if match:
-                groups[match.group(1)]['name'] = entry['Value']
+                groups[match.group(1)]['name'] = entry['Value'].decode("ascii")
 
             match = re.match('tarantool/(.*)/check_period', entry['Key'])
             if match:
@@ -284,7 +285,7 @@ class Api(object):
                 instance_id = match.group(2)
 
                 groups[group]['instances'][instance_id] = {
-                    'addr': entry['Value']
+                    'addr': entry['Value'].decode("ascii")
                 }
 
         return groups
@@ -583,10 +584,9 @@ class Api(object):
     def heal_groups(self, blueprints, allocations, emergent_states):
         groups = set()
 
-        for group in blueprints.keys() + \
-            allocations.keys() + \
-            emergent_states.keys():
-            groups.add(group)
+        groups.update(blueprints.keys())
+        groups.update(allocations.keys())
+        groups.update(emergent_states.keys())
 
         for group in groups:
             self.heal_group(group, blueprints, allocations, emergent_states)
@@ -649,7 +649,7 @@ class Api(object):
     def run_group(self, group, allocation):
         name = allocation['name']
 
-        instance_ids = allocation['instances'].keys()
+        instance_ids = list(allocation['instances'].keys())
 
         instances = allocation['instances']
         for i, instance_id in enumerate(instances):
@@ -749,7 +749,7 @@ class Api(object):
         for entry in tarantool_kv:
             match = re.match('tarantool/(.*)/type', entry['Key'])
             if match:
-                groups[match.group(1)] = entry['Value']
+                groups[match.group(1)] = entry['Value'].decode("ascii")
 
         # collect instances from blueprints
         instances = {} # <instance id>: {'type': <type>, 'addr': <addr>}
@@ -758,8 +758,9 @@ class Api(object):
             if match:
                 group = match.group(1)
                 instance = match.group(2)
-                instances[group + '_' + instance] = {'type': groups[group],
-                                                     'addr': entry['Value']}
+                instances[group + '_' + instance] = {
+                    'type': groups[group],
+                    'addr': entry['Value'].decode("ascii")}
 
 
         # collect instance statuses from registered services
@@ -782,7 +783,7 @@ class Api(object):
                                               'node': node}
 
         result = []
-        for instance in instances.iterkeys():
+        for instance in instances.keys():
 
             if instance not in status:
                 state = 'missing'
@@ -833,10 +834,10 @@ class Api(object):
         memc2_repl_status = memc2.eval("return box.info.replication['status']")
 
         if 'follow' not in memc1_repl_status:
-            memc1.eval((cmd % (memc2_host, memc2_port)).encode('ascii','ignore'))
+            memc1.eval(cmd % (memc2_host, memc2_port))
 
         if 'follow' not in memc2_repl_status:
-            memc2.eval((cmd % (memc1_host, memc1_port)).encode('ascii','ignore'))
+            memc2.eval(cmd % (memc1_host, memc1_port))
 
         timeout = time.time() + 10
         while time.time() < timeout:
@@ -859,8 +860,6 @@ class Api(object):
         pairs = self.list_memcached_pairs()
 
         pair = [i for i in pairs if i['group'] == pair_id]
-
-        print pair
 
         assert(len(pair) == 2)
 
