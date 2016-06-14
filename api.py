@@ -422,6 +422,18 @@ class Api(object):
             return True
         return False
 
+    def rerun_stopped_groups(self, group, blueprints,
+                             allocations, emergent_states):
+        # start group that is not running
+        if group in blueprints and \
+           group in allocations and \
+           group not in emergent_states:
+            alloc = allocations[group]
+            self.run_group(group, alloc)
+            return True
+        return False
+
+
     def recreate_missing_allocation(self, group, blueprints,
                                      allocations, emergent_states):
 
@@ -536,7 +548,7 @@ class Api(object):
 
 
             # failed instances must be destroyed and re-allocated
-            if allocation['status'] not in ('success', 'warning'):
+            if allocation['status'] not in ('passing', 'warning'):
                 docker_obj = docker.Client(base_url=emergent['host']+':2375')
                 docker_obj.stop(container=group+'_'+instance_id)
                 docker_obj.remove_container(container=group+'_'+instance_id)
@@ -566,6 +578,7 @@ class Api(object):
         healing_functions = [
             self.cleanup_lost_containers,
             self.allocate_non_existing_groups,
+            self.rerun_stopped_groups,
             self.recreate_missing_allocation,
             self.rerun_missing_instance,
             self.migrate_instance_to_correct_host,
@@ -667,7 +680,7 @@ class Api(object):
             else:
                 self.create_memcached(host,
                                       group+'_'+instance_id,
-                                      instance['addr'],
+                                      instance['addr'].split(':')[0],
                                       other_instance['addr'].split(':')[0])
         self.enable_memcached_replication(
             instances[instance_ids[0]]['addr'],
