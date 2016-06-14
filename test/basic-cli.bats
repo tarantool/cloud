@@ -54,33 +54,33 @@ teardown()
 }
 
 @test "starting new group" {
-    [ -z "$(cli.py ps -q)" ]
+    [ -z "$(cli.py -v ps -q)" ]
 
-    id=$(cli.py run foobar|tail -1)
+    id=$(cli.py -v run foobar|tail -1)
 
     [ ! -z "$id" ]
 
-    [ ! -z "$(cli.py ps -q)" ]
+    [ ! -z "$(cli.py -v ps -q)" ]
 }
 
 
 @test "removing running group" {
-    [ -z "$(cli.py ps -q)" ]
+    [ -z "$(cli.py -v ps -q)" ]
 
-    id=$(cli.py run foobar|tail -1)
+    id=$(cli.py -v run foobar|tail -1)
 
     [ ! -z "$id" ]
 
-    [ ! -z "$(cli.py ps -q)" ]
+    [ ! -z "$(cli.py -v ps -q)" ]
 
-    cli.py rm $id
+    cli.py -v rm $id
 
-    [ -z "$(cli.py ps -q)" ]
+    [ -z "$(cli.py -v ps -q)" ]
 
 }
 
 @test "heal group without running containers" {
-    id=$(cli.py run foobar|tail -1)
+    id=$(cli.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
 
@@ -91,13 +91,13 @@ teardown()
 
     ! ping -c1 -t1 $ip
 
-    ./cli.py heal
+    ./cli.py -v heal
 
     ping -c1 -t1 $ip
 }
 
 @test "delete group with missing blueprint" {
-    id=$(cli.py run foobar|tail -1)
+    id=$(cli.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
 
@@ -105,13 +105,13 @@ teardown()
 
     consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id
 
-    ./cli.py heal
+    ./cli.py -v heal
 
     ! ping -c1 -t1 $ip
 }
 
 @test "delete container with missing blueprint and allocation" {
-    id=$(cli.py run foobar|tail -1)
+    id=$(cli.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
 
@@ -121,14 +121,14 @@ teardown()
     consul_delete_service $CONSUL_HOST memcached "${id}_1"
     consul_delete_service $CONSUL_HOST memcached "${id}_2"
 
-    ./cli.py heal
+    ./cli.py -v heal
 
     ! ping -c1 -t1 $ip
 }
 
 
 @test "recreate instances of group with missing allocation" {
-    id=$(cli.py run foobar|tail -1)
+    id=$(cli.py -v run foobar|tail -1)
 
     cid1=$(get_container_id "${id}_1")
     cid2=$(get_container_id "${id}_2")
@@ -136,7 +136,7 @@ teardown()
     consul_delete_service $CONSUL_HOST memcached "${id}_1"
     consul_delete_service $CONSUL_HOST memcached "${id}_2"
 
-    ./cli.py heal
+    ./cli.py -v heal
 
     cid1_new=$(get_container_id "${id}_1")
     cid2_new=$(get_container_id "${id}_2")
@@ -147,7 +147,7 @@ teardown()
 }
 
 @test "recreate missing allocation and container" {
-    id=$(cli.py run foobar|tail -1)
+    id=$(cli.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid1=$(get_container_id "${id}_1")
@@ -157,7 +157,7 @@ teardown()
 
     consul_delete_service $CONSUL_HOST memcached "${id}_1"
 
-    ./cli.py heal
+    ./cli.py -v heal
     cid1_new=$(get_container_id "${id}_1")
     cid2_new=$(get_container_id "${id}_2")
 
@@ -168,7 +168,7 @@ teardown()
 }
 
 @test "recreate missing instance" {
-    id=$(cli.py run foobar|tail -1)
+    id=$(cli.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid2=$(get_container_id "${id}_2")
@@ -179,7 +179,7 @@ teardown()
 
     ! ping -c1 -t1 $ip
 
-    ./cli.py heal
+    ./cli.py -v heal
 
     ping -c1 -t1 $ip
 
@@ -188,7 +188,7 @@ teardown()
 }
 
 @test "recreate and reallocate instance from blueprint" {
-    id=$(cli.py run foobar|tail -1)
+    id=$(cli.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid1=$(get_container_id "${id}_1")
@@ -198,7 +198,7 @@ teardown()
 
     ! ping -c1 -t1 $ip
 
-    ./cli.py heal
+    ./cli.py -v heal
     cid2_new=$(get_container_id "${id}_2")
 
     ping -c1 -t1 $ip
@@ -208,7 +208,7 @@ teardown()
 
 
 @test "migrate instance to correct docker host" {
-    id=$(cli.py run foobar|tail -1)
+    id=$(cli.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid=$(get_container_id "${id}_1")
@@ -234,7 +234,7 @@ teardown()
 
     consul_register_service $new_host memcached "${id}_1" "$ip" 3301
 
-    ./cli.py heal
+    ./cli.py -v heal
 
     cid_new=$(get_container_id "${id}_1")
 
@@ -246,7 +246,7 @@ teardown()
 }
 
 @test "recreate failing container" {
-    id=$(./cli.py run --check-period 1 foobar|tail -1)
+    id=$(./cli.py -v run --check-period 1 foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid=$(get_container_id "${id}_1")
@@ -255,13 +255,13 @@ teardown()
 
     docker -H $host:2375 stop "${id}_1"
 
-    ./cli.py wait --critical "${id}_1"
+    ./cli.py -v wait --critical "${id}_1"
 
     ! ping -t1 -c1 $ip
 
-    ./cli.py heal
+    ./cli.py -v heal
 
-    ./cli.py wait --warning --passing "${id}_1"
+    ./cli.py -v wait --warning --passing "${id}_1"
 
     cid_new=$(get_container_id "${id}_1")
 

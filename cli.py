@@ -68,27 +68,62 @@ def watch(host):
 
 
 def main():
-    logging.basicConfig(format='%(levelname)s: %(message)s',level=logging.INFO)
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-H', '--host', default = None)
-    subparsers = parser.add_subparsers(dest="subparser_name")
-    ps_parser = subparsers.add_parser('ps')
-    ps_parser.add_argument('-q', '--quiet', action='store_true')
-    run_parser = subparsers.add_parser('run')
-    run_parser.add_argument('--check-period', '-p', type=int, default=10)
-    run_parser.add_argument('name')
-    rm_parser = subparsers.add_parser('rm')
-    rm_parser.add_argument('instance_id', nargs='+')
+    # Don't spam with HTTP connection logs from 'requests' module
+    logging.getLogger("requests").setLevel(logging.WARNING)
 
-    heal_parser = subparsers.add_parser('heal')
-    wait_parser = subparsers.add_parser('wait')
-    wait_parser.add_argument('--passing', action='store_true', default=False)
-    wait_parser.add_argument('--warning', action='store_true', default=False)
-    wait_parser.add_argument('--critical', action='store_true', default=False)
-    wait_parser.add_argument('instance_or_group_id')
-    watch_parser = subparsers.add_parser('watch')
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('-H', '--host',
+                        default = None,
+                        help='specify consul host to connect to')
+    parser.add_argument('-v', '--verbose',
+                        action='store_true',
+                        default=False,
+                        help='enable verbose output')
+
+    subparsers = parser.add_subparsers(title="commands", dest="subparser_name")
+
+    ps_parser = subparsers.add_parser(
+        'ps', help='show a list of running groups')
+    ps_parser.add_argument('-q', '--quiet',
+                           action='store_true',
+                           help='only show group IDs')
+
+    run_parser = subparsers.add_parser(
+        'run', help='run a new group')
+    run_parser.add_argument('--check-period', '-p', type=int, default=10)
+    run_parser.add_argument('name',
+                            help='name of the new group')
+
+    rm_parser = subparsers.add_parser(
+        'rm', help='remove one or more groups')
+    rm_parser.add_argument('group_id',
+                           nargs='+',
+                           help='group to remove')
+
+    heal_parser = subparsers.add_parser(
+        'heal', help='recover groups in failed state')
+
+    wait_parser = subparsers.add_parser(
+        'wait', help='wait for group to get to certain state')
+    wait_parser.add_argument('--passing', action='store_true', default=False,
+                             help='wait until passing state')
+    wait_parser.add_argument('--warning', action='store_true', default=False,
+                             help='wait until warning state')
+    wait_parser.add_argument('--critical', action='store_true', default=False,
+                             help='wait until critical state')
+    wait_parser.add_argument('instance_or_group_id',
+                             help='ID of group or instance to wait for')
+
+    watch_parser = subparsers.add_parser(
+        'watch', help='enter the scan->recovery loop')
 
     args = parser.parse_args()
+
+    if args.verbose:
+        logging.basicConfig(format='%(levelname)s: %(message)s',
+                            level=logging.INFO)
+
 
     if args.host is None:
         if 'CONSUL_HOST' in os.environ:
@@ -103,7 +138,7 @@ def main():
     elif args.subparser_name == 'run':
         create_instance(host, args.name, args.check_period)
     elif args.subparser_name == 'rm':
-        delete_instance(host, args.instance_id)
+        delete_instance(host, args.group_id)
     elif args.subparser_name == 'heal':
         heal(host)
     elif args.subparser_name == 'wait':
