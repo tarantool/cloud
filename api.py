@@ -187,8 +187,7 @@ class Api(object):
         return instance_id
 
     def delete_container(self, instance_id):
-
-        consul_host, docker_host = \
+        _, docker_host = \
             self.locate_tarantool_service(instance_id)
 
         logging.info("Deleting instance '%s' from '%s'",
@@ -392,10 +391,8 @@ class Api(object):
             if group in allocations:
                 alloc = allocations[group]
                 for instance_id in alloc['instances']:
-                    instance = alloc['instances'][instance_id]
-                    host = instance['host']
-                    consul_obj = consul.Consul(host=host)
-                    consul_obj.agent.service.deregister(group+'_'+instance_id)
+                    self.unregister_tarantool_service(group+'_'+instance_id)
+
             return True
 
         return False
@@ -553,8 +550,7 @@ class Api(object):
                 docker_obj.stop(container=group+'_'+instance_id)
                 docker_obj.remove_container(container=group+'_'+instance_id)
 
-                consul_obj = consul.Consul(host=allocation['host'])
-                consul_obj.agent.service.deregister(group+'_'+instance_id)
+                self.unregister_tarantool_service(group+'_'+instance_id)
 
                 alloc = self.allocate_instance(group,
                                                blueprints[group],

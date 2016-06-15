@@ -4,7 +4,8 @@ load "consul_helper"
 load "docker_helper"
 
 export PATH=$BATS_TEST_DIRNAME/..:$PATH
-export CONSUL_HOST=172.20.20.10
+
+[ -z "$CONSUL_HOST" ] && echo "Please set CONSUL_HOST" && exit 1;
 
 TARANTOOL_KEY_PREFIX=tarantool
 TARANTOOL_IMAGE=tarantool/tarantool:latest
