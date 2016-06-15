@@ -4,7 +4,7 @@ consul_delete_kv()
 {
     consul_host=$1
     kv_path=$2
-    python <<-EOF
+    python3 <<-EOF
 import consul
 c = consul.Consul(host="$consul_host")
 c.kv.delete("$kv_path", recurse=True)
@@ -15,7 +15,7 @@ consul_delete_services()
 {
     consul_host=$1
     service_name=$2
-    python <<-EOF
+    python3 <<-EOF
 import consul
 c = consul.Consul(host="172.20.20.10")
 for node in  c.catalog.nodes()[1]:
@@ -30,7 +30,7 @@ consul_delete_service()
 {
     consul_host=$1
     service_id=$2
-    python <<-EOF
+    python3 <<-EOF
 import consul
 c = consul.Consul(host="172.20.20.10")
 for node in  c.catalog.nodes()[1]:
@@ -43,7 +43,7 @@ EOF
 consul_get_docker_hosts()
 {
     consul_host=$1
-    python <<-EOF
+    python3 <<-EOF
 import consul
 c = consul.Consul(host="$consul_host")
 
@@ -56,7 +56,7 @@ for entry in health:
 
     result.append(addr)
 
-print "\n".join(result)
+print("\n".join(result))
 EOF
 }
 
@@ -65,7 +65,7 @@ consul_get_service_ip()
     consul_host=$1
     service_name=$2
     service_id=$3
-    python <<-EOF
+    python3 <<-EOF
 import consul
 c = consul.Consul(host="$consul_host")
 
@@ -76,7 +76,7 @@ for entry in health:
     addr = entry['Service']['Address'] or entry['Node']['Address']
 
     if entry['Service']['ID'] == "$service_id":
-        print addr
+        print(addr)
 EOF
 }
 
@@ -87,7 +87,7 @@ consul_delete_service()
     service_name=$2
     service_id=$3
 
-    python <<-EOF
+    python3 <<-EOF
 import consul
 c = consul.Consul(host="$consul_host")
 
@@ -113,7 +113,7 @@ consul_register_service()
     ip_addr=$4
     port=$5
 
-    python <<-EOF
+    python3 <<-EOF
 import consul
 c = consul.Consul(host="$consul_host")
 
