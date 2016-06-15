@@ -15,8 +15,11 @@ def create_instance(host, name, check_period):
 
 def delete_instance(host, instances):
     a = api.Api(host)
-    for instance in instances:
-        a.delete_memcached_pair(instance)
+    for instance_or_group_id in instances:
+        if '_' in instance_or_group_id:
+            a.delete_container(instance_or_group_id)
+        else:
+            a.delete_memcached_pair(instance_or_group_id)
 
 def print_table(header, data):
     lengths = [0] * len(header)
@@ -62,9 +65,9 @@ def wait(host, instance_or_group_id, passing, warning, critical):
     else:
         a.wait_group(instance_or_group_id, passing, warning, critical)
 
-def watch(host):
+def watch(host, watch_period):
     a = api.Api(host)
-    a.watch()
+    a.watch(watch_period)
 
 
 def main():
@@ -91,13 +94,14 @@ def main():
 
     run_parser = subparsers.add_parser(
         'run', help='run a new group')
-    run_parser.add_argument('--check-period', '-p', type=int, default=10)
+    run_parser.add_argument('--check-period', '-p', type=int, default=10,
+                            help='how often to run consul checks')
     run_parser.add_argument('name',
                             help='name of the new group')
 
     rm_parser = subparsers.add_parser(
         'rm', help='remove one or more groups')
-    rm_parser.add_argument('group_id',
+    rm_parser.add_argument('instance_or_group_id',
                            nargs='+',
                            help='group to remove')
 
@@ -117,6 +121,8 @@ def main():
 
     watch_parser = subparsers.add_parser(
         'watch', help='enter the scan->recovery loop')
+    watch_parser.add_argument('--watch-period', '-p', type=int, default=300,
+                              help='how often to query health checks')
 
     args = parser.parse_args()
 
@@ -138,14 +144,14 @@ def main():
     elif args.subparser_name == 'run':
         create_instance(host, args.name, args.check_period)
     elif args.subparser_name == 'rm':
-        delete_instance(host, args.group_id)
+        delete_instance(host, args.instance_or_group_id)
     elif args.subparser_name == 'heal':
         heal(host)
     elif args.subparser_name == 'wait':
         wait(host, args.instance_or_group_id, args.passing, args.warning, args.critical)
     elif args.subparser_name == 'watch':
         try:
-            watch(host)
+            watch(host, args.watch_period)
         except KeyboardInterrupt:
             pass
 

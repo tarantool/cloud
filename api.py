@@ -380,6 +380,9 @@ class Api(object):
            group not in blueprints:
             state = emergent_states[group]
             for instance_id in state['instances']:
+                logging.info("Removing '%s' because there is no blueprint" %
+                             (group+'_'+instance_id))
+
                 instance = state['instances'][instance_id]
                 host = instance['host']
 
@@ -493,6 +496,9 @@ class Api(object):
             # container, reallocate and recreate it
             if instance_id in allocation_instances and \
                instance_id not in emergent_instances:
+                logging.info("Creating '%s' because it is missing" %
+                             (group+'_'+instance_id))
+
                 self.run_instance(group,
                                   allocations[group],
                                   instance_id)
@@ -546,6 +552,9 @@ class Api(object):
 
             # failed instances must be destroyed and re-allocated
             if allocation['status'] not in ('passing', 'warning'):
+                logging.info("Recreating '%s' because it has failed" %
+                             (group+'_'+instance_id))
+
                 docker_obj = docker.Client(base_url=emergent['host']+':2375')
                 docker_obj.stop(container=group+'_'+instance_id)
                 docker_obj.remove_container(container=group+'_'+instance_id)
@@ -691,11 +700,12 @@ class Api(object):
         other_instance = allocation['instances'][other_instance_id]
         host = instance['host']
 
+
+
         self.create_memcached(host,
                               group+'_'+instance_id,
                               instance['addr'].split(':')[0],
                               other_instance['addr'].split(':')[0])
-
 
 
 
@@ -905,13 +915,13 @@ class Api(object):
         for instance in blueprint['instances']:
             self.wait_instance(group_id+'_'+instance, passing, warning, critical)
 
-    def watch(self):
+    def watch(self, watch_period):
         logging.info("Watching for changes in health")
         index_old = None
+
         while True:
-            index_new, health = self.consul.health.service('memcached',
-                                                           index_old,
-                                                           wait='5m')
+            index_new, health = self.consul.health.service(
+                'memcached', index_old, wait='%ds'%watch_period)
 
             if index_old == index_new:
                 # There is a 5-minute timeout for this to happen
