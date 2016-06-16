@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 import re
 import docker
 import consul
@@ -64,7 +65,7 @@ class Api(object):
         for entry in self.consul.kv.get('tarantool', recurse=True)[1] or []:
             match = re.match('tarantool/.*/instances/.*', entry['Key'])
             if match:
-                allocated_ips.add(entry['Value'])
+                allocated_ips.add(entry['Value'].decode("ascii"))
         subnet = alloc_ranges[0]
         net = ipaddress.ip_network(subnet)
 
@@ -80,11 +81,17 @@ class Api(object):
 
         result = []
         for entry in health:
+            statuses = [check['Status'] for check in entry['Checks']]
+            status = combine_consul_statuses(statuses)
+
             service_addr = entry['Service']['Address'] or entry['Node']['Address']
             port = entry['Service']['Port']
 
-            result.append((entry['Node']['Address'],
-                           service_addr+':'+str(port)))
+            if status == 'passing':
+                result.append((entry['Node']['Address'],
+                               service_addr+':'+str(port)))
+
+
 
         return result
 
@@ -186,9 +193,20 @@ class Api(object):
 
         return instance_id
 
-    def delete_container(self, instance_id):
-        _, docker_host = \
-            self.locate_tarantool_service(instance_id)
+    def delete_container(self, instance_id, docker_host=None):
+
+        if not docker_host:
+            _, docker_host = \
+                self.locate_tarantool_service(instance_id)
+
+        healthy_docker_nodes = [n[1] for n in self.get_healthy_docker_nodes()]
+
+        if docker_host not in healthy_docker_nodes:
+            logging.info(
+                "Not deleting instance '%s' from '%s' because the latter is down",
+                instance_id,
+                docker_host)
+            return
 
         logging.info("Deleting instance '%s' from '%s'",
                      instance_id,
@@ -218,33 +236,66 @@ class Api(object):
 
 
     def unregister_tarantool_service(self, instance_id):
+        nodes = self.consul.catalog.nodes()
+
         consul_host, docker_host = \
             self.locate_tarantool_service(instance_id)
 
-        consul_obj = consul.Consul(host=consul_host)
-        consul_obj.agent.service.deregister(instance_id)
+        healthy_consul_nodes = self.get_healthy_consul_nodes()
+
+        if consul_host in healthy_consul_nodes:
+            consul_obj = consul.Consul(host=consul_host)
+            consul_obj.agent.service.deregister(instance_id)
+        else:
+            nodename = None
+            consul_health = self.consul.health.service("consul")[1]
+
+            for entry in consul_health:
+                if entry['Service']['Address'] == consul_host or\
+                   entry['Node']['Address'] == consul_host:
+                    nodename = entry['Node']['Node']
+            assert(nodename)
+
+            self.consul.catalog.deregister(nodename, instance_id)
+
+    def get_healthy_consul_nodes(self):
+        consul_health = self.consul.health.service("consul")[1]
+        healthy_consul_nodes = []
+        for service in consul_health:
+            statuses = [check['Status'] for check in service['Checks']]
+            status = combine_consul_statuses(statuses)
+            if status == 'passing':
+                service_addr = service['Service']['Address'] or \
+                               service['Node']['Address']
+                healthy_consul_nodes += [service_addr]
+        return healthy_consul_nodes
+
 
     def locate_tarantool_service(self, instance_id):
-        health = self.consul.health.service("memcached")[1]
+        memcached_health = self.consul.health.service("memcached")[1]
+        docker_health = self.consul.health.service("docker")[1]
 
-        for service in health:
+        agent_addr = None
+
+        for service in memcached_health:
             if service['Service']['ID'] == instance_id:
                 agent_addr = service['Node']['Address']
                 local = consul.Consul(host=agent_addr)
 
-                docker_addr = None
-                docker_port = None
-                for local_service in local.agent.services().values():
-                    if local_service['Service'] == 'docker':
-                        docker_addr = local_service['Address'] or agent_addr
-                        docker_port = local_service['Port']
-                assert(docker_addr)
-                assert(docker_port)
-                docker_host = docker_addr + ':' + str(docker_port)
+        if not agent_addr:
+            return None, None
 
-                return agent_addr, docker_host
+        for service in docker_health:
+            if service['Node']['Address'] == agent_addr:
+                docker_addr = service['Service']['Address'] or service['Node']['Address']
+                docker_port = service['Service']['Port']
 
-        return None, None
+        assert(agent_addr)
+        assert(docker_addr)
+        assert(docker_port)
+        docker_host = docker_addr + ':' + str(docker_port)
+
+        return agent_addr, docker_host
 
 
     def get_blueprints(self):
@@ -373,6 +424,34 @@ class Api(object):
 
         return groups
 
+
+    def unallocate_instances_from_failing_nodes(self, group, blueprints,
+                                                allocations, emergent_states):
+        healthy_docker_nodes = [n[1] for n in self.get_healthy_docker_nodes()]
+
+
+        try:
+            allocation_instances = allocations[group]['instances'].keys()
+        except:
+            allocation_instances = []
+
+        try:
+            emergent_instances = emergent_states[group]['instances'].keys()
+        except:
+            emergent_instances = []
+
+        for instance_id in allocation_instances:
+            instance = allocations[group]['instances'][instance_id]
+            if instance_id not in emergent_instances and \
+               instance['host']+':2375' not in healthy_docker_nodes:
+                logging.info("Unregistering '%s' because its node failed" %
+                             (group+'_'+instance_id))
+                self.unregister_tarantool_service(group+'_'+instance_id)
+                return True
+
+        return False
+
+
     def cleanup_lost_containers(self, group, blueprints,
                                 allocations, emergent_states):
         # clean up "lost" containers
@@ -386,9 +465,8 @@ class Api(object):
                 instance = state['instances'][instance_id]
                 host = instance['host']
 
-                docker_obj = docker.Client(base_url=host+':2375')
-                docker_obj.stop(container=group+'_'+instance_id)
-                docker_obj.remove_container(container=group+'_'+instance_id)
+                self.delete_container(group+'_'+instance_id,
+                                      host+':2375')
 
             # also clean up service registrations
             if group in allocations:
@@ -414,9 +492,8 @@ class Api(object):
                     instance = state['instances'][instance_id]
                     host = instance['host']
 
-                    docker_obj = docker.Client(base_url=host+':2375')
-                    docker_obj.stop(container=group+'_'+instance_id)
-                    docker_obj.remove_container(container=group+'_'+instance_id)
+                    self.delete_container(group+'_'+instance_id,
+                                          host+':2375')
 
             self.run_group(group, alloc)
             return True
@@ -428,7 +505,18 @@ class Api(object):
         if group in blueprints and \
            group in allocations and \
            group not in emergent_states:
-            alloc = allocations[group]
+            cleanup_allocations = False
+            for instance_id in blueprints[group]['instances']:
+                if instance_id not in allocations:
+                    cleanup_allocations = True
+
+            if cleanup_allocations:
+                for instance_id in blueprints[group]['instances']:
+                    self.unregister_tarantool_service(group+'_'+instance_id)
+                    alloc = self.allocate_group(group, blueprints[group])
+            else:
+                alloc = allocations[group]
+
             self.run_group(group, alloc)
             return True
         return False
@@ -437,7 +525,10 @@ class Api(object):
     def recreate_missing_allocation(self, group, blueprints,
                                      allocations, emergent_states):
 
-        blueprint_instances = blueprints[group]['instances'].keys()
+        try:
+            blueprint_instances = blueprints[group]['instances'].keys()
+        except:
+            blueprint_instances = []
 
         try:
             allocation_instances = allocations[group]['instances'].keys()
@@ -457,9 +548,8 @@ class Api(object):
                     instance = emergent_states[group]['instances'][instance_id]
                     host = instance['host']
 
-                    docker_obj = docker.Client(base_url=host+':2375')
-                    docker_obj.stop(container=group+'_'+instance_id)
-                    docker_obj.remove_container(container=group+'_'+instance_id)
+                    self.delete_container(group+'_'+instance_id,
+                                          host+':2375')
 
                 alloc = self.allocate_instance(group,
                                                blueprints[group],
@@ -527,9 +617,8 @@ class Api(object):
                 emergent = emergent_states[group]['instances'][instance_id]
 
                 if allocation['host'] != emergent['host']:
-                    docker_obj = docker.Client(base_url=emergent['host']+':2375')
-                    docker_obj.stop(container=group+'_'+instance_id)
-                    docker_obj.remove_container(container=group+'_'+instance_id)
+                    self.delete_container(group+'_'+instance_id,
+                                          emergent['host']+':2375')
 
                     self.run_instance(group,
                                       allocations[group],
@@ -555,9 +644,8 @@ class Api(object):
                 logging.info("Recreating '%s' because it has failed" %
                              (group+'_'+instance_id))
 
-                docker_obj = docker.Client(base_url=emergent['host']+':2375')
-                docker_obj.stop(container=group+'_'+instance_id)
-                docker_obj.remove_container(container=group+'_'+instance_id)
+                self.delete_container(group+'_'+instance_id,
+                                      emergent['host']+':2375')
 
                 self.unregister_tarantool_service(group+'_'+instance_id)
 
@@ -578,36 +666,42 @@ class Api(object):
         return False
 
 
-    def heal_group(self, group, blueprints, allocations, emergent_states):
-
+    def heal_groups(self, blueprints, allocations, emergent_states):
         healing_functions = [
             self.cleanup_lost_containers,
             self.allocate_non_existing_groups,
             self.rerun_stopped_groups,
             self.recreate_missing_allocation,
+            self.unallocate_instances_from_failing_nodes,
             self.rerun_missing_instance,
             self.migrate_instance_to_correct_host,
             self.recreate_and_reallocate_failed_instance
         ]
 
-        for function in healing_functions:
-            result = function(group, blueprints,
-                              allocations, emergent_states)
-            if result:
-                return True
 
-        return False
+        repeat = True
+        while repeat:
+            repeat = False
 
+            blueprints = self.get_blueprints()
+            allocations = self.get_allocations()
+            emergent_states = self.get_emergent_state()
 
-    def heal_groups(self, blueprints, allocations, emergent_states):
-        groups = set()
+            groups = set()
+            groups.update(blueprints.keys())
+            groups.update(allocations.keys())
+            groups.update(emergent_states.keys())
 
-        groups.update(blueprints.keys())
-        groups.update(allocations.keys())
-        groups.update(emergent_states.keys())
+            for group in groups:
+                for function in healing_functions:
+                    result = function(group, blueprints,
+                                      allocations, emergent_states)
+                    if result:
+                        repeat=True
+                        break
 
-        for group in groups:
-            self.heal_group(group, blueprints, allocations, emergent_states)
+            if repeat:
+                logging.info("Will retry healing, as there were changes to system")
 
 
     def allocate_group(self, group, blueprint):
@@ -745,13 +839,19 @@ class Api(object):
         if consul1_host and docker1_host:
             consul1 = consul.Consul(host=consul1_host)
             docker1 = docker.Client(base_url=docker1_host)
-            self.delete_container(instance1)
+            try:
+                self.delete_container(instance1)
+            except docker.errors.NotFound:
+                pass
             self.unregister_tarantool_service(instance1)
 
         if consul2_host and docker2_host:
             consul2 = consul.Consul(host=consul2_host)
             docker2 = docker.Client(base_url=docker2_host)
-            self.delete_container(instance2)
+            try:
+                self.delete_container(instance2)
+            except docker.errors.NotFound:
+                pass
             self.unregister_tarantool_service(instance2)
 
         kv.delete("tarantool/%s" % pair_id, recurse=True)
@@ -938,6 +1038,7 @@ class Api(object):
                         heal = True
 
                 if heal:
+                    logging.info("One of the services failed. Running healing.")
                     self.heal()
 
             index_old=index_new

@@ -14,7 +14,7 @@ get_container_id()
 {
     instance_id=$1
 
-    for docker_host in $(consul_get_docker_hosts $CONSUL_HOST); do
+    for docker_host in $(consul_get_healthy_docker_hosts $CONSUL_HOST); do
         id=$(docker_get_container_id "$docker_host:2375" "$instance_id")
         if [ ! -z "$id" ]; then
             echo $id
@@ -26,7 +26,7 @@ get_container_id()
 get_docker_host()
 {
     instance_id=$1
-    for docker_host in $(consul_get_docker_hosts $CONSUL_HOST); do
+    for docker_host in $(consul_get_healthy_docker_hosts $CONSUL_HOST); do
         id=$(docker_get_container_id "$docker_host:2375" "$instance_id")
         if [ ! -z "$id" ]; then
             echo $docker_host
@@ -39,7 +39,7 @@ delete_container()
 {
     instance_id=$1
 
-    for docker_host in $(consul_get_docker_hosts $CONSUL_HOST); do
+    for docker_host in $(consul_get_healthy_docker_hosts $CONSUL_HOST); do
         docker_delete_instance $docker_host:2375 "$instance_id"
     done
 }
@@ -49,7 +49,7 @@ teardown()
     consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX
     consul_delete_services $CONSUL_HOST memcached
 
-    for docker_host in $(consul_get_docker_hosts $CONSUL_HOST); do
+    for docker_host in $(consul_get_healthy_docker_hosts $CONSUL_HOST); do
         docker_delete_instances $docker_host:2375 $TARANTOOL_IMAGE
     done
 }
@@ -214,7 +214,7 @@ teardown()
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid=$(get_container_id "${id}_1")
 
-    docker_hosts=$(consul_get_docker_hosts $CONSUL_HOST)
+    docker_hosts=$(consul_get_healthy_docker_hosts $CONSUL_HOST)
     docker_host_array=($docker_hosts)
     num_docker_hosts=${#docker_host_array[@]}
 

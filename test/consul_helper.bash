@@ -18,8 +18,18 @@ consul_delete_services()
     python3 <<-EOF
 import consul
 c = consul.Consul(host="172.20.20.10")
-for node in  c.catalog.nodes()[1]:
-    local = consul.Consul(host=node['Address'])
+
+consul_health = c.health.service("consul")[1]
+healthy_consul_nodes = []
+for service in consul_health:
+    statuses = [check['Status'] for check in service['Checks']]
+    if "critical" not in statuses:
+        service_addr = service['Service']['Address'] or \
+                       service['Node']['Address']
+        healthy_consul_nodes += [service_addr]
+
+for node in healthy_consul_nodes:
+    local = consul.Consul(host=node)
     services = local.health.service("$service_name")[1]
     for service in services:
         local.agent.service.deregister(service['Service']['ID'])
@@ -40,11 +50,12 @@ EOF
 }
 
 
-consul_get_docker_hosts()
+consul_get_healthy_docker_hosts()
 {
     consul_host=$1
     python3 <<-EOF
 import consul
+
 c = consul.Consul(host="$consul_host")
 
 health =  c.health.service("docker", passing=True)[1]
@@ -54,7 +65,9 @@ for entry in health:
     addr = entry['Service']['Address'] or entry['Node']['Address']
     port = entry['Service']['Port']
 
-    result.append(addr)
+    statuses = [check['Status'] for check in entry['Checks']]
+    if "critical" not in statuses:
+        result.append(addr)
 
 print("\n".join(result))
 EOF
