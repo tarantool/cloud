@@ -26,6 +26,12 @@ def combine_consul_statuses(statuses):
             total = 'warning'
     return total
 
+def consul_kv_to_dict(consul_kv_list):
+    result = {}
+    for item in consul_kv_list:
+        result[item['Key']] = item['Value'].decode("ascii")
+    return result
+
 
 
 class Api(object):
@@ -63,7 +69,7 @@ class Api(object):
         # collect instances from blueprints
         instances = {} # <instance id>: <type>
         for entry in self.consul.kv.get('tarantool', recurse=True)[1] or []:
-            match = re.match('tarantool/.*/instances/.*', entry['Key'])
+            match = re.match('tarantool/.*/blueprint/instances/.*', entry['Key'])
             if match:
                 allocated_ips.add(entry['Value'].decode("ascii"))
         subnet = alloc_ranges[0]
@@ -113,11 +119,11 @@ class Api(object):
     def create_memcached_blueprint(self, pair_id, name, ip1, ip2, check_period):
         kv = self.consul.kv
 
-        kv.put('tarantool/%s/type' % pair_id, 'memcached')
-        kv.put('tarantool/%s/name' % pair_id, name)
-        kv.put('tarantool/%s/check_period' % pair_id, str(check_period))
-        kv.put('tarantool/%s/instances/1' % pair_id, ip1)
-        kv.put('tarantool/%s/instances/2' % pair_id, ip2)
+        kv.put('tarantool/%s/blueprint/type' % pair_id, 'memcached')
+        kv.put('tarantool/%s/blueprint/name' % pair_id, name)
+        kv.put('tarantool/%s/blueprint/check_period' % pair_id, str(check_period))
+        kv.put('tarantool/%s/blueprint/instances/1/addr' % pair_id, ip1)
+        kv.put('tarantool/%s/blueprint/instances/2/addr' % pair_id, ip2)
 
 
     def create_memcached(self, docker_host, instance_id, instance_ip, replica_ip):
@@ -234,14 +240,28 @@ class Api(object):
                                                 port=3301,
                                                 check=check)
 
+    def unallocate_tarantool_service(self, instance_id):
+        kv = self.consul.kv
 
-    def unregister_tarantool_service(self, instance_id):
+        group, instance = instance_id.split('_')
+
+        kv.delete("tarantool/%s/allocation/instances/%s" % (group, instance),
+                  recurse=True)
+
+
+
+    def unregister_tarantool_service(self, instance_id, consul_host=None):
         nodes = self.consul.catalog.nodes()
 
-        consul_host, docker_host = \
-            self.locate_tarantool_service(instance_id)
+        if not consul_host:
+            consul_host, _ = \
+                self.locate_tarantool_service(instance_id)
 
         healthy_consul_nodes = self.get_healthy_consul_nodes()
+
+        logging.info("Unregistering instance '%s' from '%s'",
+                     instance_id,
+                     consul_host)
 
         if consul_host in healthy_consul_nodes:
             consul_obj = consul.Consul(host=consul_host)
@@ -311,37 +331,64 @@ class Api(object):
         }
         """
         kv = self.consul.kv
-        tarantool_kv = kv.get('tarantool', recurse=True)[1] or []
+        tarantool_kv = consul_kv_to_dict(kv.get('tarantool', recurse=True)[1] or [])
 
         groups = {}
-        for entry in tarantool_kv:
-            match = re.match('tarantool/(.*)/type', entry['Key'])
+        for key, value in tarantool_kv.items():
+            match = re.match('tarantool/(.*)/blueprint/type', key)
             if match:
-                groups[match.group(1)] = {'type': entry['Value'].decode("ascii"),
+                groups[match.group(1)] = {'type': value,
                                           'instances': {}}
 
-        for entry in tarantool_kv:
-            match = re.match('tarantool/(.*)/name', entry['Key'])
+        for key, value in tarantool_kv.items():
+            match = re.match('tarantool/(.*)/blueprint/instances/(.*)/addr', key)
             if match:
-                groups[match.group(1)]['name'] = entry['Value'].decode("ascii")
+                groups[match.group(1)]['instances'][match.group(2)] = \
+                    {'addr': None}
 
-            match = re.match('tarantool/(.*)/check_period', entry['Key'])
+        for key, value in tarantool_kv.items():
+            match = re.match('tarantool/(.*)/blueprint/name', key)
             if match:
-                groups[match.group(1)]['check_period'] = int(entry['Value'])
+                groups[match.group(1)]['name'] = value
 
-            match = re.match('tarantool/(.*)/instances/(.*)', entry['Key'])
+            match = re.match('tarantool/(.*)/blueprint/check_period', key)
+            if match:
+                groups[match.group(1)]['check_period'] = int(value)
+
+            match = re.match('tarantool/(.*)/blueprint/instances/(.*)/addr', key)
             if match:
                 group = match.group(1)
                 instance_id = match.group(2)
 
-                groups[group]['instances'][instance_id] = {
-                    'addr': entry['Value'].decode("ascii")
-                }
+                groups[group]['instances'][instance_id]['addr'] = \
+                    value
 
         return groups
 
 
     def get_allocations(self):
+        kv = self.consul.kv
+        tarantool_kv = consul_kv_to_dict(kv.get('tarantool', recurse=True)[1] or [])
+
+        groups = {}
+        for key, value in tarantool_kv.items():
+            match = re.match('tarantool/(.*)/allocation/instances/(.*)/host',
+                             key)
+            if match:
+                group = match.group(1)
+                instance_id = match.group(2)
+                if group not in groups:
+                    groups[group] = {'instances': {}}
+                if instance_id not in groups[group]['instances']:
+                    groups[group]['instances'][instance_id] = {}
+
+                groups[group]['instances'][instance_id]['host'] = \
+                    value
+
+        return groups
+
+
+    def get_registered_services(self):
         """
         returns a list of allocated groups:
         {
@@ -353,9 +400,9 @@ class Api(object):
             }
         }
         """
-        health = self.consul.health.service('memcached')[1]
-
         groups = {}
+
+        health = self.consul.health.service('memcached')[1]
         for entry in health:
             group, instance_id = entry['Service']['ID'].split('_')
             host = entry['Service']['Address'] or entry['Node']['Address']
@@ -372,11 +419,14 @@ class Api(object):
                 groups[group]['name'] = ''
                 groups[group]['instances'] = {}
 
-            groups[group]['instances'][instance_id] = {
-                'addr': addr,
+            if instance_id not in groups[group]['instances']:
+                groups[group]['instances'][instance_id] = {
+                    'addr': addr,
+                    'entries': []}
+
+            groups[group]['instances'][instance_id]['entries'].append({
                 'host': node,
-                'status': status
-            }
+                'status': status})
 
         return groups
 
@@ -424,9 +474,52 @@ class Api(object):
 
         return groups
 
+    def cleanup_stale_registrations(self, emergent_states):
+        health = self.consul.health.service('memcached')[1]
+
+        groups = {}
+
+        result = False
+
+        for entry in health:
+            group, instance_id = entry['Service']['ID'].split('_')
+
+            node = entry['Node']['Address']
+            statuses = [check['Status'] for check in entry['Checks']]
+            status = combine_consul_statuses(statuses)
+
+            if group not in groups:
+                groups[group] = set()
+
+            groups[group].add((instance_id, node, status))
+
+        for group in groups:
+            instance_ids = set([a[0] for a in groups[group]])
+
+            for instance_id in instance_ids:
+                if group not in emergent_states or \
+                   instance_id not in emergent_states[group]['instances']:
+                    continue
+
+                instance = emergent_states[group]['instances'][instance_id]
+                allocations = [a for a in groups[group] if a[0] == instance_id]
+
+                if len(allocations) > 1:
+                    for alloc in allocations:
+                        if alloc[1] != instance['host']:
+                            logging.info("Will unregister '%s' from '%s'",
+                                         group+'_'+instance_id,
+                                         alloc[1])
+                            result = True
+                            self.unregister_tarantool_service(
+                                group+'_'+instance_id,
+                                alloc[1])
+
+        return result
 
     def unallocate_instances_from_failing_nodes(self, group, blueprints,
-                                                allocations, emergent_states):
+                                                allocations, registrations,
+                                                emergent_states):
         healthy_docker_nodes = [n[1] for n in self.get_healthy_docker_nodes()]
 
 
@@ -446,6 +539,7 @@ class Api(object):
                instance['host']+':2375' not in healthy_docker_nodes:
                 logging.info("Unregistering '%s' because its node failed" %
                              (group+'_'+instance_id))
+                self.unallocate_tarantool_service(group+'_'+instance_id)
                 self.unregister_tarantool_service(group+'_'+instance_id)
                 return True
 
@@ -453,14 +547,16 @@ class Api(object):
 
 
     def cleanup_lost_containers(self, group, blueprints,
-                                allocations, emergent_states):
+                                allocations, registrations,
+                                emergent_states):
         # clean up "lost" containers
         if group in emergent_states and \
            group not in blueprints:
+            logging.info("Removing '%s' because there is no blueprint" %
+                         group)
+
             state = emergent_states[group]
             for instance_id in state['instances']:
-                logging.info("Removing '%s' because there is no blueprint" %
-                             (group+'_'+instance_id))
 
                 instance = state['instances'][instance_id]
                 host = instance['host']
@@ -472,6 +568,11 @@ class Api(object):
             if group in allocations:
                 alloc = allocations[group]
                 for instance_id in alloc['instances']:
+                    self.unallocate_tarantool_service(group+'_'+instance_id)
+
+            if group in registrations:
+                registration = registrations[group]
+                for instance_id in registration['instances']:
                     self.unregister_tarantool_service(group+'_'+instance_id)
 
             return True
@@ -479,11 +580,13 @@ class Api(object):
         return False
 
     def allocate_non_existing_groups(self, group, blueprints,
-                                     allocations, emergent_states):
+                                     allocations, registrations,
+                                     emergent_states):
         # allocate groups that don't exist
         if group in blueprints and \
            group not in allocations:
-            alloc = self.allocate_group(group, blueprints[group])
+            logging.info("Allocating '%s' because it's not allocated" %
+                         group)
 
             # if there were any existing states, they must be destroyed
             if group in emergent_states:
@@ -495,35 +598,61 @@ class Api(object):
                     self.delete_container(group+'_'+instance_id,
                                           host+':2375')
 
-            self.run_group(group, alloc)
+            # if there were any existing registrations, they must be destroyed
+            if group in registrations:
+                state = registrations[group]
+                for instance_id in state['instances']:
+                    instance = state['instances'][instance_id]
+
+                    assert(len(instance['entries']) == 1)
+                    for entry in instance['entries']:
+                        host = entry['host']
+                        self.unregister_tarantool_service(group+'_'+instance_id,
+                                                          host)
+
+            alloc = self.allocate_group(group, blueprints[group])
+            self.run_group(group, blueprints[group], alloc)
+            self.register_group(group, blueprints[group], alloc)
+
             return True
         return False
 
     def rerun_stopped_groups(self, group, blueprints,
-                             allocations, emergent_states):
+                             allocations, registrations,
+                             emergent_states):
         # start group that is not running
         if group in blueprints and \
            group in allocations and \
            group not in emergent_states:
+            logging.info("Rerunning '%s' because it's stopped" %
+                         group)
+
             cleanup_allocations = False
+
             for instance_id in blueprints[group]['instances']:
-                if instance_id not in allocations:
+                if instance_id in allocations[group]['instances']:
                     cleanup_allocations = True
+
+            if group in registrations:
+                for instance_id in registrations[group]['instances']:
+                    self.unregister_tarantool_service(group+'_'+instance_id)
 
             if cleanup_allocations:
                 for instance_id in blueprints[group]['instances']:
-                    self.unregister_tarantool_service(group+'_'+instance_id)
-                    alloc = self.allocate_group(group, blueprints[group])
+                    self.unallocate_tarantool_service(group+'_'+instance_id)
+                alloc = self.allocate_group(group, blueprints[group])
             else:
                 alloc = allocations[group]
 
-            self.run_group(group, alloc)
+            self.run_group(group, blueprints[group], alloc)
+            self.register_group(group, blueprints[group], alloc)
             return True
         return False
 
 
     def recreate_missing_allocation(self, group, blueprints,
-                                     allocations, emergent_states):
+                                    allocations, registrations,
+                                    emergent_states):
 
         try:
             blueprint_instances = blueprints[group]['instances'].keys()
@@ -544,12 +673,21 @@ class Api(object):
             # if there is a running container and no allocation, kill the
             # container, reallocate and recreate it
             if instance_id not in allocation_instances:
+                logging.info("Reallocating '%s' because it's not allocated" %
+                         (group+'_'+instance_id))
+
                 if instance_id in emergent_instances:
                     instance = emergent_states[group]['instances'][instance_id]
                     host = instance['host']
 
                     self.delete_container(group+'_'+instance_id,
                                           host+':2375')
+
+                if instance_id in registrations:
+                    instance = emergent_states[group]['instances'][instance_id]
+                    host = instance['host']
+
+                    self.unregister_tarantool_service(group+'_'+instance_id, host)
 
                 alloc = self.allocate_instance(group,
                                                blueprints[group],
@@ -560,15 +698,24 @@ class Api(object):
                 combined_allocation = allocations[group].copy()
                 combined_allocation['instances'][instance_id] = alloc
                 self.run_instance(group,
+                                  blueprints[group],
                                   combined_allocation,
                                   instance_id)
+                self.register_instance(group,
+                                       blueprints[group],
+                                       combined_allocation,
+                                       instance_id)
                 return True
 
         return False
 
     def rerun_missing_instance(self, group, blueprints,
-                                     allocations, emergent_states):
-        blueprint_instances = blueprints[group]['instances'].keys()
+                               allocations, registrations,
+                               emergent_states):
+        try:
+            blueprint_instances = blueprints[group]['instances'].keys()
+        except:
+            blueprint_instances = []
 
         try:
             allocation_instances = allocations[group]['instances'].keys()
@@ -590,6 +737,7 @@ class Api(object):
                              (group+'_'+instance_id))
 
                 self.run_instance(group,
+                                  blueprints[group],
                                   allocations[group],
                                   instance_id)
 
@@ -597,8 +745,48 @@ class Api(object):
 
         return False
 
+
+    def register_unregistered_instance(self, group, blueprints,
+                                       allocations, registrations,
+                                       emergent_states):
+        try:
+            blueprint_instances = blueprints[group]['instances'].keys()
+        except:
+            blueprint_instances = []
+
+        try:
+            allocation_instances = allocations[group]['instances'].keys()
+        except:
+            allocation_instances = []
+
+        try:
+            registered_instances = registrations[group]['instances'].keys()
+        except:
+            registered_instances = []
+
+        for instance_id in blueprint_instances:
+            # if there is a running container and no allocation, kill the
+            # container, reallocate and recreate it
+            if instance_id in allocation_instances and \
+               instance_id not in registered_instances:
+                logging.info("Registering '%s' because it is not registered" %
+                             (group+'_'+instance_id))
+
+
+
+                self.register_instance(group,
+                                       blueprints[group],
+                                       allocations[group],
+                                       instance_id)
+
+                return True
+
+        return False
+
+
     def migrate_instance_to_correct_host(self, group, blueprints,
-                                         allocations, emergent_states):
+                                         allocations, registrations,
+                                         emergent_states):
         try:
             allocation_instances = allocations[group]['instances'].keys()
         except:
@@ -617,52 +805,101 @@ class Api(object):
                 emergent = emergent_states[group]['instances'][instance_id]
 
                 if allocation['host'] != emergent['host']:
+                    logging.info("Migrating '%s' to '%s'" %
+                                 (group+'_'+instance_id, allocation['host']))
+
                     self.delete_container(group+'_'+instance_id,
                                           emergent['host']+':2375')
 
                     self.run_instance(group,
+                                      blueprints[group],
                                       allocations[group],
                                       instance_id)
 
                     return True
         return False
 
-    def recreate_and_reallocate_failed_instance(self, group, blueprints,
-                                                allocations, emergent_states):
+    def register_instance_on_correct_host(self, group, blueprints,
+                                         allocations, registrations,
+                                         emergent_states):
         try:
-            emergent_instances = emergent_states[group]['instances'].keys()
+            allocation_instances = allocations[group]['instances'].keys()
         except:
-            emergent_instances = []
+            allocation_instances = []
 
-        for instance_id in emergent_instances:
-            allocation = allocations[group]['instances'][instance_id]
-            emergent = emergent_states[group]['instances'][instance_id]
+        try:
+            registration_instances = registrations[group]['instances'].keys()
+        except:
+            registration_instances = []
 
+        for instance_id in allocation_instances:
+            if instance_id in registration_instances:
+                # if instance is located on different host than expected,
+                # it should be removed and recreated
+                allocation = allocations[group]['instances'][instance_id]
+                registration = registrations[group]['instances'][instance_id]
 
-            # failed instances must be destroyed and re-allocated
-            if allocation['status'] not in ('passing', 'warning'):
-                logging.info("Recreating '%s' because it has failed" %
-                             (group+'_'+instance_id))
+                assert(len(registration['entries']) == 1)
+                for entry in registration['entries']:
+                    if allocation['host'] != entry['host']:
+                        logging.info("Registering '%s' on '%s'" %
+                                     (group+'_'+instance_id, allocation['host']))
 
-                self.delete_container(group+'_'+instance_id,
-                                      emergent['host']+':2375')
-
-                self.unregister_tarantool_service(group+'_'+instance_id)
-
-                alloc = self.allocate_instance(group,
+                        self.unregister_tarantool_service(group+'_'+instance_id,
+                                                          entry['host'])
+                        self.register_instance(group,
                                                blueprints[group],
                                                allocations[group],
                                                instance_id)
 
-                # if we got here, it means other instance is allocated
-                combined_allocation = allocations[group].copy()
-                combined_allocation['instances'][instance_id] = alloc
-                self.run_instance(group,
-                                  combined_allocation,
-                                  instance_id)
+                        return True
+        return False
 
-                return True
 
+    def recreate_and_reallocate_failed_instance(self, group, blueprints,
+                                                allocations, registrations,
+                                                emergent_states):
+        try:
+            emergent_instances = emergent_states[group]['instances'].keys()
+        except:
+            emergent_instances = []
+        try:
+            registration_instances = registrations[group]['instances'].keys()
+        except:
+            registration_instances = []
+
+        for instance_id in registration_instances:
+
+            registration = registrations[group]['instances'][instance_id]
+            assert(len(registration['entries']) == 1)
+            for entry in registration['entries']:
+                # failed instances must be destroyed and re-allocated
+                if entry['status'] not in ('passing', 'warning'):
+                    logging.info("Recreating '%s' because it has failed" %
+                                 (group+'_'+instance_id))
+
+                    if instance_id in emergent_instances:
+                        emergent = emergent_states[group]['instances'][instance_id]
+                        self.delete_container(group+'_'+instance_id,
+                                              emergent['host']+':2375')
+
+                    self.unallocate_tarantool_service(group+'_'+instance_id)
+                    self.unregister_tarantool_service(group+'_'+instance_id)
+
+                    alloc = self.allocate_instance(group,
+                                                   blueprints[group],
+                                                   allocations[group],
+                                                   instance_id)
+
+                    # if we got here, it means other instance is allocated
+                    combined_allocation = allocations[group].copy()
+                    combined_allocation['instances'][instance_id] = alloc
+                    self.run_instance(group,
+                                      blueprints[group],
+                                      combined_allocation,
+                                      instance_id)
+
+                    return True
         return False
 
 
@@ -674,7 +911,9 @@ class Api(object):
             self.recreate_missing_allocation,
             self.unallocate_instances_from_failing_nodes,
             self.rerun_missing_instance,
+            self.register_unregistered_instance,
             self.migrate_instance_to_correct_host,
+            self.register_instance_on_correct_host,
             self.recreate_and_reallocate_failed_instance
         ]
 
@@ -685,17 +924,26 @@ class Api(object):
 
             blueprints = self.get_blueprints()
             allocations = self.get_allocations()
+            registrations = self.get_registered_services()
             emergent_states = self.get_emergent_state()
 
             groups = set()
             groups.update(blueprints.keys())
             groups.update(allocations.keys())
+            groups.update(registrations.keys())
             groups.update(emergent_states.keys())
+
+
+            result = self.cleanup_stale_registrations(emergent_states)
+            if result:
+                repeat=True
+                break
 
             for group in groups:
                 for function in healing_functions:
                     result = function(group, blueprints,
-                                      allocations, emergent_states)
+                                      allocations, registrations,
+                                      emergent_states)
                     if result:
                         repeat=True
                         break
@@ -705,6 +953,7 @@ class Api(object):
 
 
     def allocate_group(self, group, blueprint):
+        kv = self.consul.kv
         healthy_nodes = self.get_healthy_docker_nodes()
         if len(healthy_nodes) >= 2:
             pick = random.sample(healthy_nodes, 2)
@@ -716,24 +965,38 @@ class Api(object):
         name = blueprint['name']
         instance_type = blueprint['type']
 
-        result = {'name': name, 'type': instance_type, 'instances': {}}
+        result = {'name': name,
+                  'type': instance_type,
+                  'instances': {},
+                  'check_period': blueprint['check_period']}
 
         for i, instance_id in enumerate(blueprint['instances']):
             consul_host = pick[i][0]
             instance = blueprint['instances'][instance_id]
             addr = instance['addr']
 
-            self.register_tarantool_service(consul_host, addr,
-                                            group+'_'+instance_id, name,
-                                            blueprint['check_period'])
-
             result['instances'][instance_id] = {
                 'host': consul_host,
-                'addr': addr
+                'addr': addr,
             }
+            kv.put('tarantool/%s/allocation/instances/%s/host' % (group, instance_id),
+                   consul_host)
+
         return result
 
+    def register_group(self, group, blueprint, allocation):
+        for instance_id in allocation['instances']:
+            consul_host = allocation['instances'][instance_id]['host']
+            addr = blueprint['instances'][instance_id]['addr']
+            name = blueprint['name']
+            self.register_tarantool_service(consul_host, addr,
+                                            group+'_'+instance_id, name,
+                                            allocation['check_period'])
+
+
     def allocate_instance(self, group, blueprint, allocation, instance_id):
+        kv = self.consul.kv
+
         other_instance_id = [i for i in allocation['instances']
                              if i != instance_id][0]
         other_instance = allocation['instances'][other_instance_id]
@@ -748,58 +1011,71 @@ class Api(object):
         addr = instance['addr']
         name = blueprint['name']
 
+        kv.put('tarantool/%s/allocation/instances/%s/host' % (group, instance_id),
+                   consul_host)
+
+        return {
+            'host': consul_host,
+            'addr': addr,
+            'name': name,
+            'check_period': blueprint['check_period']
+        }
+
+
+    def register_instance(self, group, blueprint, allocation, instance_id):
+        consul_host = allocation['instances'][instance_id]['host']
+        addr = blueprint['instances'][instance_id]['addr']
+        name = blueprint['name']
+
         self.register_tarantool_service(consul_host, addr,
                                         group+'_'+instance_id, name,
                                         blueprint['check_period'])
 
-        return {
-            'host': consul_host,
-            'addr': addr
-        }
 
-
-    def run_group(self, group, allocation):
-        name = allocation['name']
+    def run_group(self, group, blueprint, allocation):
+        name = blueprint['name']
 
         instance_ids = list(allocation['instances'].keys())
 
         instances = allocation['instances']
         for i, instance_id in enumerate(instances):
-            instance = instances[instance_id]
-            other_instance = instances[instance_ids[1-i]]
+            other_instance_id = instance_ids[1-i]
 
-            host = instance['host']
+            bp = blueprint['instances'][instance_id]
+            other_bp = blueprint['instances'][other_instance_id]
+            alloc = allocation['instances'][instance_id]
+
+            host = alloc['host']
 
             if i == 0:
                 self.create_memcached(host,
                                       group+'_'+instance_id,
-                                      instance['addr'].split(':')[0],
+                                      bp['addr'].split(':')[0],
                                       None)
 
             else:
                 self.create_memcached(host,
                                       group+'_'+instance_id,
-                                      instance['addr'].split(':')[0],
-                                      other_instance['addr'].split(':')[0])
+                                      bp['addr'].split(':')[0],
+                                      other_bp['addr'].split(':')[0])
         self.enable_memcached_replication(
             instances[instance_ids[0]]['addr'],
             instances[instance_ids[1]]['addr'])
 
 
-    def run_instance(self, group, allocation, instance_id):
+    def run_instance(self, group, blueprint, allocation, instance_id):
         other_instance_id = [i for i in allocation['instances']
                              if i != instance_id][0]
 
-        instance = allocation['instances'][instance_id]
-        other_instance = allocation['instances'][other_instance_id]
-        host = instance['host']
-
-
+        bp = blueprint['instances'][instance_id]
+        other_bp = blueprint['instances'][other_instance_id]
+        alloc = allocation['instances'][instance_id]
+        host = alloc['host']
 
         self.create_memcached(host,
                               group+'_'+instance_id,
-                              instance['addr'].split(':')[0],
-                              other_instance['addr'].split(':')[0])
+                              bp['addr'].split(':')[0],
+                              other_bp['addr'].split(':')[0])
 
 
 
@@ -823,7 +1099,7 @@ class Api(object):
     def delete_memcached_pair(self, pair_id):
         kv = self.consul.kv
 
-        instance_type = kv.get("tarantool/%s/type" % pair_id)
+        instance_type = kv.get("tarantool/%s/blueprint/type" % pair_id)
 
         if instance_type[1] == None:
             raise RuntimeError("Pair '%s' doesn't exist" % pair_id)
@@ -866,20 +1142,27 @@ class Api(object):
         # collect group list
         groups = {} # <group id>: <type>
         for entry in tarantool_kv:
-            match = re.match('tarantool/(.*)/type', entry['Key'])
+            match = re.match('tarantool/(.*)/blueprint/type', entry['Key'])
             if match:
                 groups[match.group(1)] = entry['Value'].decode("ascii")
+        names = {} # <group id>: <type>
+        for entry in tarantool_kv:
+            match = re.match('tarantool/(.*)/blueprint/name', entry['Key'])
+            if match:
+                names[match.group(1)] = entry['Value'].decode("ascii")
+
 
         # collect instances from blueprints
         instances = {} # <instance id>: {'type': <type>, 'addr': <addr>}
         for entry in tarantool_kv:
-            match = re.match('tarantool/(.*)/instances/(.*)', entry['Key'])
+            match = re.match('tarantool/(.*)/blueprint/instances/(.*)/addr', entry['Key'])
             if match:
                 group = match.group(1)
                 instance = match.group(2)
                 instances[group + '_' + instance] = {
                     'type': groups[group],
-                    'addr': entry['Value'].decode("ascii")}
+                    'addr': entry['Value'].decode("ascii"),
+                    'name': names[group]}
 
 
         # collect instance statuses from registered services
@@ -918,6 +1201,7 @@ class Api(object):
             result.append({'group': group,
                            'instance': instance_no,
                            'type': instances[instance]['type'],
+                           'name': instances[instance]['name'],
                            'state': state,
                            'addr': addr,
                            'node': node})

@@ -118,7 +118,7 @@ teardown()
 
     ping -c1 -t1 $ip
 
-    consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id
+    consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id/blueprint
     consul_delete_service $CONSUL_HOST memcached "${id}_1"
     consul_delete_service $CONSUL_HOST memcached "${id}_2"
 
@@ -134,8 +134,7 @@ teardown()
     cid1=$(get_container_id "${id}_1")
     cid2=$(get_container_id "${id}_2")
 
-    consul_delete_service $CONSUL_HOST memcached "${id}_1"
-    consul_delete_service $CONSUL_HOST memcached "${id}_2"
+    consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id/allocation
 
     ./cli.py -v heal
 
@@ -156,7 +155,7 @@ teardown()
 
     ping -c1 -t1 $ip
 
-    consul_delete_service $CONSUL_HOST memcached "${id}_1"
+    consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id/allocation/instances/1
 
     ./cli.py -v heal
     cid1_new=$(get_container_id "${id}_1")
@@ -194,6 +193,7 @@ teardown()
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid1=$(get_container_id "${id}_1")
 
+    consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id/allocation/instances/1
     consul_delete_service $CONSUL_HOST memcached "${id}_1"
     delete_container "${id}_1"
 
@@ -231,9 +231,9 @@ teardown()
     new_host_idx=$(bc <<< "($host_idx + 1) % $num_docker_hosts" )
     new_host="${docker_host_array[$new_host_idx]}"
 
-    consul_delete_service $CONSUL_HOST memcached "${id}_1"
+    consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id/allocation/instances/1
 
-    consul_register_service $new_host memcached "${id}_1" "$ip" 3301
+    consul_put_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id/allocation/instances/1/host $new_host
 
     ./cli.py -v heal
 

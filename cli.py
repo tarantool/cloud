@@ -42,6 +42,7 @@ def list_instances(host, quiet = False):
     header = [
         ('group', 'GROUP'),
         ('instance', 'INSTANCE #'),
+        ('name', 'NAME'),
         ('type', 'TYPE'),
         ('state', 'STATE'),
         ('addr', 'ADDRESS'),

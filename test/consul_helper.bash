@@ -11,6 +11,19 @@ c.kv.delete("$kv_path", recurse=True)
 EOF
 }
 
+consul_put_kv()
+{
+    consul_host=$1
+    kv_path=$2
+    kv_value=$3
+    python3 <<-EOF
+import consul
+c = consul.Consul(host="$consul_host")
+c.kv.put("$kv_path", "$kv_value")
+EOF
+}
+
+
 consul_delete_services()
 {
     consul_host=$1
