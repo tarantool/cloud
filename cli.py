@@ -55,9 +55,15 @@ def list_instances(host, quiet = False):
         groups = set([i['group'] for i in instances])
         print('\n'.join(groups))
 
-def heal(host):
+def heal(host, attach, heal_period):
     a = api.Api(host)
-    a.heal()
+    if attach:
+        try:
+            a.heal_loop(heal_period)
+        except KeyboardInterrupt:
+            pass
+    else:
+        a.heal()
 
 def wait(host, instance_or_group_id, passing, warning, critical):
     a = api.Api(host)
@@ -68,7 +74,10 @@ def wait(host, instance_or_group_id, passing, warning, critical):
 
 def watch(host, watch_period):
     a = api.Api(host)
-    a.watch(watch_period)
+    try:
+        a.watch(watch_period)
+    except KeyboardInterrupt:
+        pass
 
 
 def main():
@@ -109,6 +118,12 @@ def main():
     heal_parser = subparsers.add_parser(
         'heal', help='recover groups in failed state')
 
+    heal_parser.add_argument(
+        '--attach', '-a', action='store_true', default=False,
+        help='attach to system and run healing continuously',)
+    heal_parser.add_argument('--heal-period', '-p', type=int, default=300,
+                              help='how often to query health checks')
+
     wait_parser = subparsers.add_parser(
         'wait', help='wait for group to get to certain state')
     wait_parser.add_argument('--passing', action='store_true', default=False,
@@ -121,7 +136,7 @@ def main():
                              help='ID of group or instance to wait for')
 
     watch_parser = subparsers.add_parser(
-        'watch', help='enter the scan->recovery loop')
+        'watch', help='monitor for state changes')
     watch_parser.add_argument('--watch-period', '-p', type=int, default=300,
                               help='how often to query health checks')
 
@@ -147,14 +162,11 @@ def main():
     elif args.subparser_name == 'rm':
         delete_instance(host, args.instance_or_group_id)
     elif args.subparser_name == 'heal':
-        heal(host)
+        heal(host, args.attach, args.heal_period)
     elif args.subparser_name == 'wait':
         wait(host, args.instance_or_group_id, args.passing, args.warning, args.critical)
     elif args.subparser_name == 'watch':
-        try:
-            watch(host, args.watch_period)
-        except KeyboardInterrupt:
-            pass
+        watch(host, args.watch_period)
 
 
 if __name__ == '__main__':

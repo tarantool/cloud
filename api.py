@@ -1287,10 +1287,6 @@ class Api(object):
                         return
             time.sleep(0.5)
 
-
-
-
-
     def wait_group(self, group_id, passing, warning, critical):
         blueprints = self.get_blueprints()
 
@@ -1299,7 +1295,7 @@ class Api(object):
         for instance in blueprint['instances']:
             self.wait_instance(group_id+'_'+instance, passing, warning, critical)
 
-    def watch(self, watch_period):
+    def heal_loop(self, watch_period):
         logging.info("Watching for changes in health")
         index_old = None
 
@@ -1324,5 +1320,84 @@ class Api(object):
                 if heal:
                     logging.info("One of the services failed. Running healing.")
                     self.heal()
+
+            index_old=index_new
+
+    def watch(self, watch_period):
+        logging.info("Watching for changes in health")
+        index_old = None
+
+        blueprints_old = self.get_blueprints()
+        allocations_old = self.get_allocations()
+        registrations_old = self.get_registered_services()
+        emergent_states_old = self.get_emergent_state()
+
+        while True:
+            index_new, health = self.consul.health.service(
+                'memcached', index_old, wait='%ds'%watch_period)
+
+            blueprints = self.get_blueprints()
+            allocations = self.get_allocations()
+            registrations = self.get_registered_services()
+            emergent_states = self.get_emergent_state()
+
+            for group in blueprints:
+                if group not in blueprints_old:
+                    print("Created group '%s'" % group)
+            for group in allocations:
+                if group not in allocations_old:
+                    print("Allocated group '%s'" % group)
+            for group in registrations:
+                if group not in registrations_old:
+                    print("Registered group '%s'" % group)
+            for group in emergent_states:
+                if group not in emergent_states_old:
+                    print("Started containers for group '%s'" % group)
+
+            for group in blueprints_old:
+                if group not in blueprints:
+                    print("Deleted group '%s'" % group)
+            for group in allocations_old:
+                if group not in allocations:
+                    print("Unallocated group '%s'" % group)
+            for group in registrations_old:
+                if group not in registrations:
+                    print("Unregistered group '%s'" % group)
+            for group in emergent_states_old:
+                if group not in emergent_states:
+                    print("Stopped containers for group '%s'" % group)
+
+
+
+            for group in registrations:
+                if group in registrations_old:
+                    instances = set(list(registrations[group]['instances'].keys()) +
+                                    list(registrations_old[group]['instances'].keys()))
+                    for instance_id in instances:
+                        if instance_id in registrations[group]['instances'] and \
+                           instance_id in registrations_old[group]['instances']:
+                            reg = registrations[group]['instances'][instance_id]
+                            reg_old = registrations_old[group]['instances'][instance_id]
+
+                            statuses = [e['status'] for e in reg['entries']]
+                            statuses_old = [e['status'] for e in reg_old['entries']]
+
+                            status = combine_consul_statuses(statuses)
+                            status_old = combine_consul_statuses(statuses_old)
+
+                            if status == 'passing' and status != status_old:
+                                print("Instance '%s' is passing" %
+                                      (group + '_' + instance_id))
+                            elif status == 'warning' and status != status_old:
+                                print("Instance '%s' is warning" %
+                                      (group + '_' + instance_id))
+                            elif status == 'critical' and status != status_old:
+                                print("Instance '%s' is critical" %
+                                      (group + '_' + instance_id))
+
+            blueprints_old = blueprints
+            allocations_old = allocations
+            registrations_old = registrations
+            emergent_states_old = emergent_states
 
             index_old=index_new
