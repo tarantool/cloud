@@ -3,23 +3,24 @@
 http = require('http.server')
 
 local replica = os.getenv('REPLICA')
+local arena = tonumber(os.getenv('ARENA')) or 0.5
 local EXPOSED_PORT = 3301
 local ADMIN_PORT = 3302
 local memcached = require('memcached')
 local fiber = require('fiber')
 
 box.cfg{
-    slab_alloc_arena = 0.5;
+    slab_alloc_arena = arena;
     wal_mode = 'write';
     listen = ADMIN_PORT;
-    logger = './tnt.log';
     replication_source = replica;
 }
 
 if replica == nil or replica == '' then
     -- enable admin provison
-    box.schema.user.grant('guest', 'read,write,execute', 'universe')
-    box.schema.user.grant('guest', 'replication')
+    box.schema.user.grant('guest', 'read,write,execute',
+                          'universe', nil, {if_not_exists=true})
+    box.schema.user.grant('guest', 'replication', nil, nil, {if_not_exists=true})
 else
     -- wait for relay on init
     while box.space.instance == nil do

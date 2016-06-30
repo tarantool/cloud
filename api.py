@@ -116,17 +116,20 @@ class Api(object):
         for line in result:
             logging.info(line)
 
-    def create_memcached_blueprint(self, pair_id, name, ip1, ip2, check_period):
+    def create_memcached_blueprint(self, pair_id, name, memsize,
+                                   ip1, ip2, check_period):
         kv = self.consul.kv
 
         kv.put('tarantool/%s/blueprint/type' % pair_id, 'memcached')
         kv.put('tarantool/%s/blueprint/name' % pair_id, name)
+        kv.put('tarantool/%s/blueprint/memsize' % pair_id, str(memsize))
         kv.put('tarantool/%s/blueprint/check_period' % pair_id, str(check_period))
         kv.put('tarantool/%s/blueprint/instances/1/addr' % pair_id, ip1)
         kv.put('tarantool/%s/blueprint/instances/2/addr' % pair_id, ip2)
 
 
-    def create_memcached(self, docker_host, instance_id, instance_ip, replica_ip):
+    def create_memcached(self, docker_host, instance_id,
+                         memsize, instance_ip, replica_ip):
         docker_obj = docker.Client(base_url=docker_host+':2375')
 
         if not replica_ip:
@@ -181,6 +184,8 @@ class Api(object):
 
         environment = {}
 
+        environment['ARENA'] = memsize
+
         if replica_ip:
             environment['REPLICA'] = replica_ip + ':3302'
 
@@ -223,6 +228,54 @@ class Api(object):
         docker_obj.stop(container=instance_id)
         docker_obj.remove_container(container=instance_id)
 
+    def stop_container(self, instance_id, docker_host=None):
+
+        if not docker_host:
+            _, docker_host = \
+                self.locate_tarantool_service(instance_id)
+
+        healthy_docker_nodes = [n[1] for n in self.get_healthy_docker_nodes()]
+
+        if docker_host not in healthy_docker_nodes:
+            logging.info(
+                "Not stopping instance '%s' on '%s' because the latter is down",
+                instance_id,
+                docker_host)
+            return
+
+        logging.info("Stopping instance '%s' on '%s'",
+                     instance_id,
+                     docker_host)
+
+        docker_obj = docker.Client(base_url=docker_host)
+
+        docker_obj.stop(container=instance_id)
+
+    def start_container(self, instance_id, docker_host=None):
+
+        if not docker_host:
+            _, docker_host = \
+                self.locate_tarantool_service(instance_id)
+
+        healthy_docker_nodes = [n[1] for n in self.get_healthy_docker_nodes()]
+
+        if docker_host not in healthy_docker_nodes:
+            logging.info(
+                "Not starting instance '%s' on '%s' because the latter is down",
+                instance_id,
+                docker_host)
+            return
+
+        logging.info("Starting instance '%s' on '%s'",
+                     instance_id,
+                     docker_host)
+
+        docker_obj = docker.Client(base_url=docker_host)
+
+        docker_obj.start(container=instance_id)
+
+
+
     def register_tarantool_service(self, consul_host, ipaddr, instance_id, name, check_period):
         consul_obj = consul.Consul(host=consul_host)
         #check = consul.Check.http("http://%s:8080/ping" % ipaddr, "10s")
@@ -262,6 +315,11 @@ class Api(object):
         logging.info("Unregistering instance '%s' from '%s'",
                      instance_id,
                      consul_host)
+
+        if not consul_host:
+            logging.info("Not unregistering '%s', as it's not registered",
+                         instance_id)
+            return
 
         if consul_host in healthy_consul_nodes:
             consul_obj = consul.Consul(host=consul_host)
@@ -324,6 +382,7 @@ class Api(object):
         {
             'type': 'memcached',
             'name': '<group name>',
+            'memsize': <amount of memory>,
             'instances': {
                 '1': {'addr': '<ip addr>'},
                 '2': {'addr': '<ip addr>'}
@@ -339,6 +398,11 @@ class Api(object):
             if match:
                 groups[match.group(1)] = {'type': value,
                                           'instances': {}}
+
+        for key, value in tarantool_kv.items():
+            match = re.match('tarantool/(.*)/blueprint/memsize', key)
+            if match:
+                groups[match.group(1)]['memsize'] = float(value)
 
         for key, value in tarantool_kv.items():
             match = re.match('tarantool/(.*)/blueprint/instances/(.*)/addr', key)
@@ -459,6 +523,8 @@ class Api(object):
                 macvlan = container['NetworkSettings']['Networks']['macvlan']
                 addr = macvlan['IPAMConfig']['IPv4Address']
                 host = node[0]
+                is_running = container['State'] == 'running'
+
 
                 if group not in groups:
                     groups[group] = {}
@@ -468,9 +534,9 @@ class Api(object):
 
                 groups[group]['instances'][instance_id] = {
                     'addr': addr + ':3301',
-                    'host': host
+                    'host': host,
+                    'is_running': is_running
                 }
-
 
         return groups
 
@@ -1050,12 +1116,14 @@ class Api(object):
             if i == 0:
                 self.create_memcached(host,
                                       group+'_'+instance_id,
+                                      blueprint['memsize'],
                                       bp['addr'].split(':')[0],
                                       None)
 
             else:
                 self.create_memcached(host,
                                       group+'_'+instance_id,
+                                      blueprint['memsize'],
                                       bp['addr'].split(':')[0],
                                       other_bp['addr'].split(':')[0])
         self.enable_memcached_replication(
@@ -1074,18 +1142,20 @@ class Api(object):
 
         self.create_memcached(host,
                               group+'_'+instance_id,
+                              blueprint['memsize'],
                               bp['addr'].split(':')[0],
                               other_bp['addr'].split(':')[0])
 
 
 
-    def create_memcached_pair(self, name, check_period):
+    def create_memcached_pair(self, name, memsize, check_period):
         pair_id = self.generate_id()
 
         ip1 = self.allocate_ip()
         ip2 = self.allocate_ip(skip=[ip1])
 
-        self.create_memcached_blueprint(pair_id, name, ip1, ip2, check_period)
+        self.create_memcached_blueprint(pair_id, name, memsize,
+                                        ip1, ip2, check_period)
 
         blueprints = self.get_blueprints()
         allocations = self.get_allocations()
@@ -1139,72 +1209,60 @@ class Api(object):
 
         tarantool_kv = kv.get('tarantool', recurse=True)[1] or []
 
-        # collect group list
-        groups = {} # <group id>: <type>
-        for entry in tarantool_kv:
-            match = re.match('tarantool/(.*)/blueprint/type', entry['Key'])
-            if match:
-                groups[match.group(1)] = entry['Value'].decode("ascii")
-        names = {} # <group id>: <type>
-        for entry in tarantool_kv:
-            match = re.match('tarantool/(.*)/blueprint/name', entry['Key'])
-            if match:
-                names[match.group(1)] = entry['Value'].decode("ascii")
 
+        blueprints = self.get_blueprints()
+        allocations = self.get_allocations()
+        registrations = self.get_registered_services()
+        emergent_states = self.get_emergent_state()
 
-        # collect instances from blueprints
-        instances = {} # <instance id>: {'type': <type>, 'addr': <addr>}
-        for entry in tarantool_kv:
-            match = re.match('tarantool/(.*)/blueprint/instances/(.*)/addr', entry['Key'])
-            if match:
-                group = match.group(1)
-                instance = match.group(2)
-                instances[group + '_' + instance] = {
-                    'type': groups[group],
-                    'addr': entry['Value'].decode("ascii"),
-                    'name': names[group]}
+        groups = set()
+        groups.update(blueprints.keys())
 
-
-        # collect instance statuses from registered services
-        status = {}
-        for entry in health:
-            check_total = "passing"
-            for check in entry['Checks']:
-                if check['Status'] == 'critical':
-                    check_total = 'critical'
-                elif check['Status'] == 'warning' and check_total == 'passing':
-                    check_total = 'warning'
-
-            host = entry['Service']['Address'] or entry['Node']['Address']
-            port = entry['Service']['Port']
-            addr = '%s:%s' % (host, port)
-            node = entry['Node']['Address']
-
-            status[entry['Service']['ID']] = {'check': check_total,
-                                              'addr': addr,
-                                              'node': node}
 
         result = []
-        for instance in instances.keys():
 
-            if instance not in status:
-                state = 'missing'
-                addr = instances[instance]['addr']
-                node = 'N/A'
-            else:
-                state = status[instance]['check']
-                addr = status[instance]['addr']
-                node = status[instance]['node']
+        for group in sorted(groups):
+            blueprint = blueprints[group]
+            for instance_id in blueprint['instances']:
+                if group in allocations:
+                    node = allocations[group]['instances'][instance_id]['host']
+                else:
+                    node = 'N/A'
 
-            group, instance_no = instance.split('_')
+                if group in registrations and \
+                   instance_id in registrations[group]['instances']:
+                    registration = registrations[group]
 
-            result.append({'group': group,
-                           'instance': instance_no,
-                           'type': instances[instance]['type'],
-                           'name': instances[instance]['name'],
-                           'state': state,
-                           'addr': addr,
-                           'node': node})
+                    if group in emergent_states and \
+                       instance_id in emergent_states[group]['instances'] and\
+                       not emergent_states[group]['instances'][instance_id] \
+                           ['is_running']:
+                        status = 'stopped'
+                    else:
+                        status = combine_consul_statuses(
+                            [e['status'] for e in
+                             registration['instances'][instance_id]['entries']])
+                else:
+                    if group in emergent_states and \
+                       instance_id in emergent_states[group]['instances']:
+
+                       if emergent_states[group]['instances'][instance_id] \
+                          ['is_running']:
+                           status = 'unregistered'
+                       else:
+                           status = 'stopped'
+                    else:
+                        status = 'missing'
+
+
+                result.append({'group': group,
+                               'instance': instance_id,
+                               'type': blueprint['type'],
+                               'name': blueprint['name'],
+                               'size': str(blueprint['memsize']),
+                               'state': status,
+                               'addr': blueprint['instances'][instance_id]['addr'],
+                               'node': node})
 
         return result
 
@@ -1401,3 +1459,81 @@ class Api(object):
             emergent_states_old = emergent_states
 
             index_old=index_new
+
+    def stop(self, group_id):
+        kv = self.consul.kv
+        tarantool_kv = consul_kv_to_dict(kv.get('tarantool', recurse=True)[1] or [])
+
+        instance_ids = set()
+        for key, value in tarantool_kv.items():
+            match = re.match('tarantool/%s/blueprint/instances/(.*)/' % group_id,
+                             key)
+            if match:
+                instance_ids.add(match.group(1))
+
+        for instance_id in instance_ids:
+            consul_host, docker_host = self.locate_tarantool_service(
+                group_id+'_'+instance_id)
+
+            if not docker_host:
+                for entry in self.consul.kv.get('tarantool', recurse=True)[1] or []:
+                    match = re.match('tarantool/%s/allocation/instances/%s/host' %
+                                     (group_id, instance_id),
+                                     entry['Key'])
+                    if match:
+                        docker_host = entry['Value'].decode("ascii") + ':2375'
+
+
+            if docker_host:
+                self.stop_container(group_id+'_'+instance_id, docker_host)
+
+            if consul_host:
+                self.unregister_tarantool_service(group_id+'_'+instance_id,
+                                                  consul_host)
+
+    def start(self, group_id):
+        kv = self.consul.kv
+        tarantool_kv = consul_kv_to_dict(kv.get('tarantool', recurse=True)[1] or [])
+
+        instance_ids = set()
+        for key, value in tarantool_kv.items():
+            match = re.match('tarantool/%s/blueprint/instances/(.*)/' % group_id,
+                             key)
+            if match:
+                instance_ids.add(match.group(1))
+
+        blueprints = self.get_blueprints()
+        allocations = self.get_allocations()
+        emergent_states = self.get_emergent_state()
+
+        blueprint = blueprints[group_id]
+        allocation = allocations[group_id]
+        state = emergent_states[group_id]
+
+        for instance_id in instance_ids:
+            consul_host, docker_host = self.locate_tarantool_service(
+                group_id+'_'+instance_id)
+
+            if not consul_host:
+                consul_host = allocation['instances'][instance_id]['host']
+                addr = blueprint['instances'][instance_id]['addr']
+                name = blueprint['name']
+
+                self.register_tarantool_service(consul_host, addr,
+                                                group_id+'_'+instance_id,
+                                                name,
+                                                blueprint['check_period'])
+
+            if not docker_host:
+                consul_host, docker_host = self.locate_tarantool_service(
+                    group_id+'_'+instance_id)
+
+            if docker_host:
+                self.start_container(group_id+'_'+instance_id)
+
+        instance_ids = list(blueprint['instances'].keys())
+        instances = blueprint['instances']
+
+        self.enable_memcached_replication(
+            instances[instance_ids[0]]['addr'],
+            instances[instance_ids[1]]['addr'])

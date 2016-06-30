@@ -7,9 +7,9 @@ import sys
 import logging
 import time
 
-def create_instance(host, name, check_period):
+def create_instance(host, name, memsize, check_period):
     a = api.Api(host)
-    instance_id = a.create_memcached_pair(name, check_period)
+    instance_id = a.create_memcached_pair(name, memsize, check_period)
 
     print(instance_id)
 
@@ -44,6 +44,7 @@ def list_instances(host, quiet = False):
         ('instance', 'INSTANCE #'),
         ('name', 'NAME'),
         ('type', 'TYPE'),
+        ('size', 'SIZE'),
         ('state', 'STATE'),
         ('addr', 'ADDRESS'),
         ('node', 'NODE')
@@ -79,6 +80,13 @@ def watch(host, watch_period):
     except KeyboardInterrupt:
         pass
 
+def stop(host, group_id):
+    a = api.Api(host)
+    a.stop(group_id)
+
+def start(host, group_id):
+    a = api.Api(host)
+    a.start(group_id)
 
 def main():
     # Don't spam with HTTP connection logs from 'requests' module
@@ -106,6 +114,10 @@ def main():
         'run', help='run a new group')
     run_parser.add_argument('--check-period', '-p', type=int, default=10,
                             help='how often to run consul checks')
+    run_parser.add_argument('--memsize',
+                            type=float,
+                            help='amount of memory to allocate',
+                            default=0.5)
     run_parser.add_argument('name',
                             help='name of the new group')
 
@@ -140,6 +152,18 @@ def main():
     watch_parser.add_argument('--watch-period', '-p', type=int, default=300,
                               help='how often to query health checks')
 
+
+    stop_parser = subparsers.add_parser(
+        'stop', help='stop group')
+    stop_parser.add_argument('group_id',
+                             help='group ID to stop')
+
+    start_parser = subparsers.add_parser(
+        'start', help='start group')
+    start_parser.add_argument('group_id',
+                             help='group ID to start')
+
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -158,7 +182,7 @@ def main():
     if args.subparser_name == 'ps':
         list_instances(host, args.quiet)
     elif args.subparser_name == 'run':
-        create_instance(host, args.name, args.check_period)
+        create_instance(host, args.name, args.memsize, args.check_period)
     elif args.subparser_name == 'rm':
         delete_instance(host, args.instance_or_group_id)
     elif args.subparser_name == 'heal':
@@ -167,6 +191,10 @@ def main():
         wait(host, args.instance_or_group_id, args.passing, args.warning, args.critical)
     elif args.subparser_name == 'watch':
         watch(host, args.watch_period)
+    elif args.subparser_name == 'stop':
+        stop(host, args.group_id)
+    elif args.subparser_name == 'start':
+        start(host, args.group_id)
 
 
 if __name__ == '__main__':
