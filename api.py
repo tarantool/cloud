@@ -1174,31 +1174,23 @@ class Api(object):
         if instance_type[1] == None:
             raise RuntimeError("Pair '%s' doesn't exist" % pair_id)
 
-        instance1 = pair_id + '_1'
-        instance2 = pair_id + '_2'
+        blueprints = self.get_blueprints()
+        allocations = self.get_allocations()
 
-        consul1_host, docker1_host = \
-            self.locate_tarantool_service(instance1)
-        consul2_host, docker2_host = \
-            self.locate_tarantool_service(instance2)
+        allocation = allocations[pair_id]
 
-        if consul1_host and docker1_host:
-            consul1 = consul.Consul(host=consul1_host)
-            docker1 = docker.Client(base_url=docker1_host)
-            try:
-                self.delete_container(instance1)
-            except docker.errors.NotFound:
-                pass
-            self.unregister_tarantool_service(instance1)
+        instance_ids = blueprints[pair_id]['instances'].keys()
+        for instance_id in instance_ids:
+            consul_host, docker_host = self.locate_tarantool_service(
+                pair_id+'_'+instance_id)
 
-        if consul2_host and docker2_host:
-            consul2 = consul.Consul(host=consul2_host)
-            docker2 = docker.Client(base_url=docker2_host)
-            try:
-                self.delete_container(instance2)
-            except docker.errors.NotFound:
-                pass
-            self.unregister_tarantool_service(instance2)
+            docker_host = allocation['instances'][instance_id]['host'] + ':2375'
+
+            self.delete_container(pair_id+'_'+instance_id, docker_host)
+
+            if consul_host:
+                self.unregister_tarantool_service(pair_id+'_'+instance_id,
+                                                  consul_host)
 
         kv.delete("tarantool/%s" % pair_id, recurse=True)
 
@@ -1223,7 +1215,7 @@ class Api(object):
 
         for group in sorted(groups):
             blueprint = blueprints[group]
-            for instance_id in blueprint['instances']:
+            for instance_id in sorted(blueprint['instances'].keys()):
                 if group in allocations:
                     node = allocations[group]['instances'][instance_id]['host']
                 else:
