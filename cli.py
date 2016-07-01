@@ -88,6 +88,14 @@ def start(host, group_id):
     a = api.Api(host)
     a.start(group_id)
 
+
+def update(host, group_id, memsize):
+    a = api.Api(host)
+
+    if memsize:
+        a.resize(group_id, memsize)
+
+
 def main():
     # Don't spam with HTTP connection logs from 'requests' module
     logging.getLogger("requests").setLevel(logging.WARNING)
@@ -163,6 +171,14 @@ def main():
     start_parser.add_argument('group_id',
                              help='group ID to start')
 
+    update_parser = subparsers.add_parser(
+        'update', help='update an existing group')
+    update_parser.add_argument('--memsize',
+                               type=float,
+                               help='amount of memory to set',
+                               default=None)
+    update_parser.add_argument('group_id',
+                               help='group ID to update')
 
     args = parser.parse_args()
 
@@ -195,6 +211,8 @@ def main():
         stop(host, args.group_id)
     elif args.subparser_name == 'start':
         start(host, args.group_id)
+    elif args.subparser_name == 'update':
+        update(host, args.group_id, args.memsize)
 
 
 if __name__ == '__main__':

@@ -1158,11 +1158,10 @@ class Api(object):
                                         ip1, ip2, check_period)
 
         blueprints = self.get_blueprints()
-        allocations = self.get_allocations()
-        emergent_states = self.get_emergent_state()
-        self.heal_groups(blueprints, allocations, emergent_states)
 
-        #self.enable_memcached_replication(ip1+':3301', ip2+':3301')
+        alloc = self.allocate_group(pair_id, blueprints[pair_id])
+        self.run_group(pair_id, blueprints[pair_id], alloc)
+        self.register_group(pair_id, blueprints[pair_id], alloc)
 
         return pair_id
 
@@ -1529,3 +1528,71 @@ class Api(object):
         self.enable_memcached_replication(
             instances[instance_ids[0]]['addr'],
             instances[instance_ids[1]]['addr'])
+
+    def resize(self, group_id, new_size):
+        blueprints = self.get_blueprints()
+        allocations = self.get_allocations()
+        registrations = self.get_registered_services()
+        emergent_states = self.get_emergent_state()
+
+        if group_id not in blueprints or group_id not in registrations:
+            return
+
+        blueprint = blueprints[group_id]
+        allocation = allocations[group_id]
+        registration = registrations[group_id]
+        state = emergent_states[group_id]
+
+        instance_ids = list(allocation['instances'].keys())
+        instances = allocation['instances']
+
+
+        for instance_id in instances:
+            status = combine_consul_statuses(
+                [e['status'] for e in
+                 registration['instances'][instance_id]['entries']])
+
+            if status != 'passing':
+                print("All instances in group '%s' must be 'passing' "
+                      "before resizing" % group_id)
+                return
+
+        kv = self.consul.kv
+        kv.put('tarantool/%s/blueprint/memsize' % group_id, str(new_size))
+
+        for i, instance_id in enumerate(instances):
+            other_instance_id = instance_ids[1-i]
+
+            bp = blueprint['instances'][instance_id]
+            other_bp = blueprint['instances'][other_instance_id]
+            alloc = allocation['instances'][instance_id]
+            host = alloc['host']
+
+            self.delete_container(group_id+'_'+instance_id)
+
+            self.create_memcached(host,
+                                  group_id+'_'+instance_id,
+                                  blueprint['memsize'],
+                                  bp['addr'].split(':')[0],
+                                  other_bp['addr'].split(':')[0])
+
+
+
+            print("Waiting for replication")
+            timeout = time.time() + 1000 # TODO: pick better estimate
+            while time.time() < timeout:
+                try:
+                    memc = tarantool.Connection(bp['addr'].split(':')[0], 3302)
+                    status = memc.eval("return box.info.replication['status']")
+
+                    if 'follow' in status:
+                        break
+                except:
+                    pass
+                time.sleep(0.5)
+
+            if time.time() > timeout:
+                raise RuntimeError("Failed to enable replication between " +
+                                   "'%s' and '%s'" %
+                                   (bp['addr'].split(':')[0],
+                                    other_bp['addr'].split(':')[0]))
