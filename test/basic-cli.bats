@@ -55,33 +55,33 @@ teardown()
 }
 
 @test "starting new group" {
-    [ -z "$(cli.py -v ps -q)" ]
+    [ -z "$(taas.py -v ps -q)" ]
 
-    id=$(cli.py -v run foobar|tail -1)
+    id=$(taas.py -v run foobar|tail -1)
 
     [ ! -z "$id" ]
 
-    [ ! -z "$(cli.py -v ps -q)" ]
+    [ ! -z "$(taas.py -v ps -q)" ]
 }
 
 
 @test "removing running group" {
-    [ -z "$(cli.py -v ps -q)" ]
+    [ -z "$(taas.py -v ps -q)" ]
 
-    id=$(cli.py -v run foobar|tail -1)
+    id=$(taas.py -v run foobar|tail -1)
 
     [ ! -z "$id" ]
 
-    [ ! -z "$(cli.py -v ps -q)" ]
+    [ ! -z "$(taas.py -v ps -q)" ]
 
-    cli.py -v rm $id
+    taas.py -v rm $id
 
-    [ -z "$(cli.py -v ps -q)" ]
+    [ -z "$(taas.py -v ps -q)" ]
 
 }
 
 @test "heal group without running containers" {
-    id=$(cli.py -v run foobar|tail -1)
+    id=$(taas.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
 
@@ -92,13 +92,13 @@ teardown()
 
     ! ping -c1 -t1 $ip
 
-    ./cli.py -v heal
+    ./taas.py -v heal
 
     ping -c1 -t1 $ip
 }
 
 @test "delete group with missing blueprint" {
-    id=$(cli.py -v run foobar|tail -1)
+    id=$(taas.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
 
@@ -106,13 +106,13 @@ teardown()
 
     consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id
 
-    ./cli.py -v heal
+    ./taas.py -v heal
 
     ! ping -c1 -t1 $ip
 }
 
 @test "delete container with missing blueprint and allocation" {
-    id=$(cli.py -v run foobar|tail -1)
+    id=$(taas.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
 
@@ -122,21 +122,21 @@ teardown()
     consul_delete_service $CONSUL_HOST memcached "${id}_1"
     consul_delete_service $CONSUL_HOST memcached "${id}_2"
 
-    ./cli.py -v heal
+    ./taas.py -v heal
 
     ! ping -c1 -t1 $ip
 }
 
 
 @test "recreate instances of group with missing allocation" {
-    id=$(cli.py -v run foobar|tail -1)
+    id=$(taas.py -v run foobar|tail -1)
 
     cid1=$(get_container_id "${id}_1")
     cid2=$(get_container_id "${id}_2")
 
     consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id/allocation
 
-    ./cli.py -v heal
+    ./taas.py -v heal
 
     cid1_new=$(get_container_id "${id}_1")
     cid2_new=$(get_container_id "${id}_2")
@@ -147,7 +147,7 @@ teardown()
 }
 
 @test "recreate missing allocation and container" {
-    id=$(cli.py -v run foobar|tail -1)
+    id=$(taas.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid1=$(get_container_id "${id}_1")
@@ -157,7 +157,7 @@ teardown()
 
     consul_delete_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id/allocation/instances/1
 
-    ./cli.py -v heal
+    ./taas.py -v heal
     cid1_new=$(get_container_id "${id}_1")
     cid2_new=$(get_container_id "${id}_2")
 
@@ -168,7 +168,7 @@ teardown()
 }
 
 @test "recreate missing instance" {
-    id=$(cli.py -v run foobar|tail -1)
+    id=$(taas.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid2=$(get_container_id "${id}_2")
@@ -179,7 +179,7 @@ teardown()
 
     ! ping -c1 -t1 $ip
 
-    ./cli.py -v heal
+    ./taas.py -v heal
 
     ping -c1 -t1 $ip
 
@@ -188,7 +188,7 @@ teardown()
 }
 
 @test "recreate and reallocate instance from blueprint" {
-    id=$(cli.py -v run foobar|tail -1)
+    id=$(taas.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid1=$(get_container_id "${id}_1")
@@ -199,7 +199,7 @@ teardown()
 
     ! ping -c1 -t1 $ip
 
-    ./cli.py -v heal
+    ./taas.py -v heal
     cid2_new=$(get_container_id "${id}_2")
 
     ping -c1 -t1 $ip
@@ -209,7 +209,7 @@ teardown()
 
 
 @test "migrate instance to correct docker host" {
-    id=$(cli.py -v run foobar|tail -1)
+    id=$(taas.py -v run foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid=$(get_container_id "${id}_1")
@@ -235,7 +235,7 @@ teardown()
 
     consul_put_kv $CONSUL_HOST $TARANTOOL_KEY_PREFIX/$id/allocation/instances/1/host $new_host
 
-    ./cli.py -v heal
+    ./taas.py -v heal
 
     cid_new=$(get_container_id "${id}_1")
 
@@ -247,7 +247,7 @@ teardown()
 }
 
 @test "recreate failing container" {
-    id=$(./cli.py -v run --check-period 1 foobar|tail -1)
+    id=$(./taas.py -v run --check-period 1 foobar|tail -1)
 
     ip=$(consul_get_service_ip $CONSUL_HOST memcached "${id}_1")
     cid=$(get_container_id "${id}_1")
@@ -256,13 +256,13 @@ teardown()
 
     docker -H $host:2375 stop "${id}_1"
 
-    ./cli.py -v wait --critical "${id}_1"
+    ./taas.py -v wait --critical "${id}_1"
 
     ! ping -t1 -c1 $ip
 
-    ./cli.py -v heal
+    ./taas.py -v heal
 
-    ./cli.py -v wait --warning --passing "${id}_1"
+    ./taas.py -v wait --warning --passing "${id}_1"
 
     cid_new=$(get_container_id "${id}_1")
 
