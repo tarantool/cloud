@@ -17,6 +17,15 @@ def abort_if_group_doesnt_exist(group_id):
     if group_id not in GROUPS:
         abort(404, message="group {} doesn't exist".format(group_id))
 
+def abort_if_instance_doesnt_exist(instance_id):
+    for _, group in GROUPS.items():
+        for instance in group['instances']:
+            if instance['id'] == instance_id:
+                return
+
+    abort(404, message="instance {} doesn't exist".format(instance_id))
+
+
 def allocate_ip(skip=[]):
     allocated_ips = set([ALLOC_SUBNET.split('/')[0]])
 
@@ -73,10 +82,12 @@ def create_group(name, memsize):
              'instances': [{'id': group_id+'_1',
                             'name': '1',
                             'addr': ip1,
+                            'type': 'memcached',
                             'host': 'localhost'},
                            {'id': group_id+'_2',
                             'name': '2',
                             'addr': ip2,
+                            'type': 'memcached',
                             'host': 'localhost'}]
     }
 
@@ -105,10 +116,35 @@ class StateList(Resource):
                 '2': {'id': '2', 'name': 'Degraded', 'type': 'warning'},
                 '3': {'id': '3', 'name': 'Down', 'type': 'critical'}}
 
+class Instance(Resource):
+    def get(self, instance_id):
+        abort_if_instance_doesnt_exist(instance_id)
+
+        for _, group in GROUPS.items():
+            for instance in group['instances']:
+                if instance['id'] == instance_id:
+                    return instance
+
+
+class InstanceList(Resource):
+    def get(self):
+        instances = {}
+        for _, group in GROUPS.items():
+            for instance in group['instances']:
+                instances[instance['id']] = instance
+
+        return instances
+
+
+
 api.add_resource(GroupList, '/api/groups')
 api.add_resource(Group, '/api/groups/<group_id>')
 
+api.add_resource(InstanceList, '/api/instances')
+api.add_resource(Instance, '/api/instances/<instance_id>')
+
 api.add_resource(StateList, '/api/states')
+
 
 
 group1 = create_group('memcached for Bob', 0.5)
