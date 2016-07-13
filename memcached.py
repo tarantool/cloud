@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+
+import global_env
+import group
+import consul
+from sense import Sense
+import ip_pool
+import random
+import logging
+import docker
+import uuid
+
+class Memcached(group.Group):
+    def __init__(self, consul_host, group_id):
+        super(Memcached, self).__init__(consul_host, group_id)
+
+    @classmethod
+    def get(cls, group_id):
+        memc = Memcached(global_env.consul_host, group_id)
+
+        return memc
+
+    @classmethod
+    def create(cls, name, memsize, check_period):
+        group_id = uuid.uuid4().hex
+
+        consul_obj = consul.Consul(host=global_env.consul_host)
+        kv = consul_obj.kv
+
+        ip1 = ip_pool.allocate_ip()
+        ip2 = ip_pool.allocate_ip()
+
+        kv.put('tarantool/%s/blueprint/type' % group_id, 'memcached')
+        kv.put('tarantool/%s/blueprint/name' % group_id, name)
+        kv.put('tarantool/%s/blueprint/memsize' % group_id, str(memsize))
+        kv.put('tarantool/%s/blueprint/check_period' % group_id, str(check_period))
+        kv.put('tarantool/%s/blueprint/instances/1/addr' % group_id, ip1)
+        kv.put('tarantool/%s/blueprint/instances/2/addr' % group_id, ip2)
+
+        Sense.update()
+
+        memc = Memcached(global_env.consul_host, group_id)
+
+        memc.allocate()
+        Sense.update()
+
+        memc.register()
+        Sense.update()
+
+        memc.create_containers()
+        Sense.update()
+
+        return memc
+
+    def delete(self):
+        self.unallocate()
+        self.unregister()
+        self.remove_containers()
+        self.remove_blueprint()
+        Sense.update()
+
+    def allocate(self):
+        consul_obj = consul.Consul(host=global_env.consul_host)
+        kv = consul_obj.kv
+
+        blueprint = self.blueprint
+
+        docker_hosts = [h for h in Sense.docker_hosts()
+                        if h['status'] == 'passing']
+
+        if len(docker_hosts) >= 2:
+            pick = random.sample(docker_hosts, 2)
+        elif len(docker_hosts) == 1:
+            pick = docker_hosts * 2
+        else:
+            raise RuntimeError("There are no healthy docker nodes")
+
+        for i, instance_id in enumerate(blueprint['instances']):
+            consul_host = pick[i]['consul_host']
+
+            kv.put('tarantool/%s/allocation/instances/%s/host' %
+                   (self.group_id, instance_id),
+                   consul_host)
+
+    def unallocate(self):
+        consul_obj = consul.Consul(host=global_env.consul_host)
+        kv = consul_obj.kv
+
+        logging.info("Unallocating '%s'", self.group_id)
+
+        kv.delete("tarantool/%s/allocation" % self.group_id,
+                  recurse=True)
+
+    def register(self):
+        self.register_instance("1")
+        self.register_instance("2")
+
+    def unregister(self):
+        self.unregister_instance("1")
+        self.unregister_instance("2")
+
+    def create_containers(self):
+        self.create_container("1")
+        self.create_container("2")
+
+    def remove_containers(self):
+        self.remove_container("1")
+        self.remove_container("2")
+
+    def remove_blueprint(self):
+        consul_obj = consul.Consul(host=global_env.consul_host)
+        kv = consul_obj.kv
+
+        logging.info("Removing blueprint '%s'", self.group_id)
+
+        kv.delete("tarantool/%s/blueprint" % self.group_id,
+                  recurse=True)
+
+
+    def register_instance(self, instance_num):
+        blueprint = self.blueprint
+        allocation = self.allocation
+
+        print("allocation: ", allocation)
+
+        instance_id = self.group_id + '_' + instance_num
+        consul_host = allocation['instances'][instance_num]['host']
+        addr = blueprint['instances'][instance_num]['addr']
+        check_period = blueprint['check_period']
+
+        consul_obj = consul.Consul(host=consul_host)
+
+        check = {
+            'docker_container_id': instance_id,
+            'shell': "/bin/bash",
+            'script': "/var/lib/mon.d/tarantool_replication.sh",
+            'interval': "%ds" % check_period,
+            'status' : 'warning'
+        }
+
+        logging.info("Registering instance '%s' on '%s'",
+                     instance_id,
+                     consul_host)
+
+        ret = consul_obj.agent.service.register("memcached",
+                                                service_id=instance_id,
+                                                address=addr,
+                                                port=3301,
+                                                check=check,
+                                                tags=['tarantool'])
+
+    def unregister_instance(self, instance_num):
+        services = self.services
+
+        instance_id = self.group_id + '_' + instance_num
+
+        consul_hosts = [h['addr'].split(':')[0] for h in Sense.consul_hosts()
+                        if h['status'] == 'passing']
+
+        print("Consul hosts: ", consul_hosts)
+        if services:
+            consul_host = services['instances'][instance_num]['host']
+
+            if consul_host in consul_hosts:
+                logging.info("Unregistering instance '%s' from '%s'",
+                             instance_id,
+                             consul_host)
+
+                consul_obj = consul.Consul(host=consul_host)
+                consul_obj.agent.service.deregister(instance_id)
+        else:
+            logging.info("Not unregistering '%s', as it's not registered",
+                         instance_id)
+
+
+    def create_container(self, instance_num):
+        blueprint = self.blueprint
+        allocation = self.allocation
+
+        instance_id = self.group_id + '_' + instance_num
+        addr = blueprint['instances'][instance_num]['addr']
+        memsize = blueprint['memsize']
+        docker_host = allocation['instances'][instance_num]['host']
+
+        replica_ip = None
+        if instance_num == '2':
+            replica_ip = blueprint['instances']['1']['addr']
+
+        docker_obj = docker.Client(base_url=docker_host+':2375')
+
+        if not replica_ip:
+            logging.info("Creating memcached '%s' on '%s' with ip '%s'",
+                         instance_id, docker_obj.base_url, addr)
+        else:
+            logging.info("Creating memcached '%s' on '%s' with ip '%s'" +
+                         " and replication source: '%s'",
+                         instance_id, docker_obj.base_url, addr, replica_ip)
+
+
+        target_app ='/var/lib/tarantool/app.lua'
+        src_app = '/opt/tarantool_cloud/app.lua'
+
+        target_mon = '/var/lib/mon.d'
+        src_mon = '/opt/tarantool_cloud/mon.d'
+
+        host_config = docker_obj.create_host_config(
+            binds =
+            {
+                src_app : {
+                    'bind' : target_app,
+                    'mode' : 'ro'
+                },
+                src_mon : {
+                    'bind' : target_mon,
+                    'mode' : 'ro'
+                }
+            })
+
+        cmd = 'tarantool /var/lib/tarantool/app.lua'
+
+        networking_config = {
+            'EndpointsConfig':
+            {
+                'macvlan':
+                {
+                    'IPAMConfig':
+                    {
+                        "IPv4Address": addr,
+                        "IPv6Address": ""
+                    },
+                    "Links": [],
+                    "Aliases": []
+                }
+            }
+        }
+
+        environment = {}
+
+        environment['ARENA'] = memsize
+
+        if replica_ip:
+            environment['REPLICA'] = replica_ip + ':3302'
+
+        container = docker_obj.create_container(image='tarantool/tarantool:latest',
+                                                name=instance_id,
+                                                command=cmd,
+                                                host_config=host_config,
+                                                networking_config=networking_config,
+                                                environment=environment,
+                                                labels=['tarantool'])
+
+        docker_obj.connect_container_to_network(container.get('Id'),
+                                                'macvlan',
+                                                ipv4_address=addr)
+        docker_obj.start(container=container.get('Id'))
+
+
+    def remove_container(self, instance_num):
+        containers = self.containers
+        instance_id = self.group_id + '_' + instance_num
+        docker_hosts = [h['addr'].split(':')[0] for h in Sense.docker_hosts()
+                        if h['status'] == 'passing']
+        print("Docker hosts: ", docker_hosts)
+
+        if containers:
+            docker_host = containers['instances'][instance_num]['host']
+
+            if docker_host in docker_hosts:
+                logging.info("Removing container '%s' from '%s'",
+                             instance_id,
+                             docker_host)
+
+                docker_obj = docker.Client(base_url=docker_host+':2375')
+                docker_obj.stop(container=instance_id)
+                docker_obj.remove_container(container=instance_id)
+        else:
+            logging.info("Not removing container '%s', as it doesn't exist",
+                         instance_id)
