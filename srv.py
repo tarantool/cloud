@@ -10,12 +10,10 @@ import ipaddress
 import memcached
 import sense
 import global_env
+import logging
 from gevent.wsgi import WSGIServer
 from flask import Flask
 from flask_restful import reqparse, abort, Api, Resource
-
-ALLOC_SUBNET=u"172.20.0.0/16"
-GROUPS = {}
 
 app = Flask(__name__)
 app.config['DEBUG'] = True
@@ -192,6 +190,12 @@ def setup_routes():
 
 
 def main():
+    # Don't spam with HTTP connection logs from 'requests' module
+    logging.getLogger("requests").setLevel(logging.WARNING)
+
+    logging.basicConfig(format='%(levelname)s: %(message)s',
+                        level=logging.INFO)
+
     if 'CONSUL_HOST' in os.environ:
         global_env.consul_host = os.environ['CONSUL_HOST']
     else:

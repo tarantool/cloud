@@ -9,6 +9,8 @@ import random
 import logging
 import docker
 import uuid
+import time
+import tarantool
 
 class Memcached(group.Group):
     def __init__(self, consul_host, group_id):
@@ -49,6 +51,8 @@ class Memcached(group.Group):
 
         memc.create_containers()
         Sense.update()
+
+        memc.enable_replication()
 
         return memc
 
@@ -116,12 +120,61 @@ class Memcached(group.Group):
         kv.delete("tarantool/%s/blueprint" % self.group_id,
                   recurse=True)
 
+    def enable_replication(self):
+        port = 3302
+
+        blueprint = self.blueprint
+
+        memc1_host = blueprint['instances']['1']['addr']
+        memc2_host = blueprint['instances']['1']['addr']
+
+        logging.info("Enabling replication between '%s' and '%s'",
+                     memc1_host, memc2_host)
+
+        timeout = time.time() + 10
+        while time.time() < timeout:
+            try:
+                memc1 = tarantool.Connection(memc1_host, 3302)
+                memc2 = tarantool.Connection(memc2_host, 3302)
+                break
+            except:
+                pass
+            time.sleep(0.5)
+
+        if time.time() > timeout:
+            raise RuntimeError("Failed to enable replication between '%s' and '%s'" %
+                               (memc1_host, memc2_host))
+
+        cmd = "box.cfg{replication_source=\"%s:%d\"}"
+
+        memc1_repl_status = memc1.eval("return box.info.replication['status']")
+        memc2_repl_status = memc2.eval("return box.info.replication['status']")
+
+        if 'follow' not in memc1_repl_status:
+            memc1.eval(cmd % (memc2_host, port))
+
+        if 'follow' not in memc2_repl_status:
+            memc2.eval(cmd % (memc1_host, port))
+
+        timeout = time.time() + 10
+        while time.time() < timeout:
+            memc1_repl_status = memc1.eval("return box.info.replication['status']")
+            memc2_repl_status = memc2.eval("return box.info.replication['status']")
+
+            if 'follow' in memc1_repl_status and 'follow' in memc2_repl_status:
+                break
+            time.sleep(0.5)
+
+        if 'follow' not in memc1_repl_status:
+            raise RuntimeError("Failed to enable replication on '%s'" % memcached1)
+
+        if 'follow' not in memc2_repl_status:
+            raise RuntimeError("Failed to enable replication on '%s'" % memcached2)
+
 
     def register_instance(self, instance_num):
         blueprint = self.blueprint
         allocation = self.allocation
-
-        print("allocation: ", allocation)
 
         instance_id = self.group_id + '_' + instance_num
         consul_host = allocation['instances'][instance_num]['host']
