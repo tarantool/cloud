@@ -4,11 +4,15 @@ import global_env
 import consul
 import docker
 import re
+import time
 
 def consul_kv_to_dict(consul_kv_list):
     result = {}
     for item in consul_kv_list:
-        result[item['Key']] = item['Value'].decode("ascii")
+        if item['Value'] == None:
+            result[item['Key']] = ""
+        else:
+            result[item['Key']] = item['Value'].decode("ascii")
     return result
 
 def combine_consul_statuses(statuses):
@@ -228,3 +232,44 @@ class Sense(object):
                            'status': status})
 
         return result
+
+    @classmethod
+    def consul_kv_refresh(cls):
+        index = None
+        consul_obj = consul.Consul(host=global_env.consul_host)
+
+        while True:
+            try:
+                index_new, kv = consul_obj.kv.get('tarantool', recurse=True,
+                                                  index=index)
+
+                if index_new != index and kv:
+                    global_env.kv = kv
+            except Exception:
+                time.sleep(10)
+
+    @classmethod
+    def consul_service_refresh(cls):
+        index = None
+        consul_obj = consul.Consul(host=global_env.consul_host)
+
+        while True:
+            try:
+                index_new, kv = consul_obj.kv.get('tarantool', recurse=True,
+                                                  index=index)
+
+                if index_new != index and kv:
+                    global_env.kv = kv
+            except Exception:
+                time.sleep(10)
+
+
+
+    @classmethod
+    def timer_update(cls):
+        while True:
+            try:
+                cls.update()
+                time.sleep(10)
+            except Exception:
+                time.sleep(10)

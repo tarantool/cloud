@@ -1,0 +1,53 @@
+{% extends "bootstrap/base.html" %}
+{% block title %}Server list{% endblock %}
+
+{% block content %}
+
+<div class="container">
+
+<div class="page-header">
+  <h1>Tarantool Instance Manager</h1>
+</div>
+
+<nav class="navbar navbar-default">
+  <div class="container-fluid">
+    <!-- Brand and toggle get grouped for better mobile display -->
+    <ul class="nav navbar-nav navbar-left">
+      <li><a href="/groups">Groups</a></li>
+      <li class="active"><a href="/servers">Servers</a></li>
+    </ul>
+  </div>
+</nav>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th>Address</th>
+      <th>Consul Host</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {% for server in servers%}
+
+    {% if server['status'] == 'passing' %}
+      {% set tr_class="" %}
+    {% elif server['status'] == 'warning' %}
+      {% set tr_class="warning" %}
+    {% else %}
+      {% set tr_class="danger" %}
+    {% endif %}
+
+
+    <tr class="{{tr_class}}">
+      <td>{{ server['addr'] }}</td>
+      <td>{{ server['consul_host'] }}</td>
+      <td>{{ server['status'] }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% endblock %}

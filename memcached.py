@@ -205,6 +205,9 @@ class Memcached(group.Group):
     def unregister_instance(self, instance_num):
         services = self.services
 
+        if instance_num not in services['instances']:
+            return
+
         instance_id = self.group_id + '_' + instance_num
 
         consul_hosts = [h['addr'].split(':')[0] for h in Sense.consul_hosts()
@@ -310,6 +313,10 @@ class Memcached(group.Group):
 
     def remove_container(self, instance_num):
         containers = self.containers
+
+        if instance_num not in containers['instances']:
+            return
+
         instance_id = self.group_id + '_' + instance_num
         docker_hosts = [h['addr'].split(':')[0] for h in Sense.docker_hosts()
                         if h['status'] == 'passing']

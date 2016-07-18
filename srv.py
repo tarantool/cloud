@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import gevent
 from gevent import monkey
 monkey.patch_all()
 
@@ -12,12 +13,16 @@ import sense
 import global_env
 import logging
 from gevent.wsgi import WSGIServer
+import flask
 from flask import Flask
 from flask_restful import reqparse, abort, Api, Resource
+from flask_bootstrap import Bootstrap
+
 
 app = Flask(__name__)
 app.config['DEBUG'] = True
 api = Api(app)
+Bootstrap(app)
 
 def abort_if_group_doesnt_exist(group_id):
     if group_id not in sense.Sense.blueprints():
@@ -50,18 +55,21 @@ def instance_to_dict(instance_id):
     memc = memcached.Memcached.get(group_id)
     blueprint = memc.blueprint
     allocation = memc.allocation
+    services = memc.services
 
     addr = blueprint['instances'][instance_num]['addr']
     host = allocation['instances'][instance_num]['host']
     type_str = blueprint['type']
     name = instance_num
     instance_id = group_id + '_' + instance_num
+    state = services['instances'][instance_num]['status']
 
     return {'id': instance_id,
             'name': name,
             'addr': addr,
             'type': type_str,
-            'host': host}
+            'host': host,
+            'state': state_to_dict(state)}
 
 
 def group_to_dict(group_id):
@@ -83,12 +91,14 @@ def group_to_dict(group_id):
         type_str = blueprint['type']
         name = instance_num
         instance_id = group_id + '_' + instance_num
+        instance_state = services['instances'][instance_num]['status']
 
         instances.append({'id': instance_id,
                           'name': name,
                           'addr': addr,
                           'type': type_str,
-                          'host': host})
+                          'host': host,
+                          'state': state_to_dict(instance_state)})
 
 
     result = {'name': blueprint['name'],
@@ -188,6 +198,50 @@ def setup_routes():
 
     api.add_resource(StateList, '/api/states')
 
+@app.route('/servers')
+def list_servers():
+    servers = sense.Sense.docker_hosts()
+
+    return flask.render_template('server_list.html', servers=servers)
+
+@app.route('/groups', methods=['GET'])
+@app.route('/', methods=['GET'])
+def list_groups():
+    blueprints = sense.Sense.blueprints()
+    result = {}
+    for group_id in blueprints:
+        result[group_id] = group_to_dict(group_id)
+
+    return flask.render_template('group_list.html', groups=result)
+
+@app.route('/groups/<group_id>', methods=['GET'])
+def show_group(group_id):
+    group = group_to_dict(group_id)
+    return flask.render_template('group.html', group=group)
+
+@app.route('/groups', methods=['POST'])
+def create_group():
+    print("Form: ", str(flask.request.form))
+    name=flask.request.form['name']
+
+    try:
+        memsize=float(flask.request.form['memsize'])
+    except ValueError:
+        memsize = 0.5
+
+    memcached.Memcached.create(name, memsize, 10)
+
+
+    return flask.redirect("/groups")
+
+@app.route('/groups/<group_id>/delete', methods=['POST'])
+def delete_group(group_id):
+    memc = memcached.Memcached.get(group_id)
+    memc.delete()
+
+    return flask.redirect("/groups")
+
+
 
 def main():
     # Don't spam with HTTP connection logs from 'requests' module
@@ -205,8 +259,12 @@ def main():
 
     sense.Sense.update()
 
+    gevent.spawn(sense.Sense.timer_update)
+
+
     http_server = WSGIServer(('', 5000), app)
     http_server.serve_forever()
+
 
 
 if __name__ == '__main__':

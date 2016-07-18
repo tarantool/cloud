@@ -1,0 +1,84 @@
+{% extends "bootstrap/base.html" %}
+{% block title %}Group list{% endblock %}
+
+{% block content %}
+
+<div class="container">
+
+<div class="page-header">
+  <h1>Tarantool Instance Manager</h1>
+</div>
+
+<nav class="navbar navbar-default">
+  <div class="container-fluid">
+    <!-- Brand and toggle get grouped for better mobile display -->
+    <ul class="nav navbar-nav navbar-left">
+      <li class="active"><a href="/groups">Groups</a></li>
+      <li><a href="/servers">Servers</a></li>
+    </ul>
+  </div>
+</nav>
+
+<div class="panel panel-default">
+  <div class="panel-body">
+  <form class="form-inline" action="{{ url_for('create_group')}}" method="post">
+    <div class="form-group">
+      <label for="name">Name</label>
+      <input type="text" class="form-control" id="name" name="name" placeholder="My Instance">
+    </div>
+    <div class="form-group">
+      <label for="memsize">Memory</label>
+      <input type="text" class="form-control" id="memsize" name="memsize" placeholder="0.5">
+    </div>
+    <button type="submit" class="btn btn-default">Create</button>
+  </form>
+  </div>
+</div>
+
+<table class="table table-hover">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Name</th>
+      <th>Type</th>
+      <th>Memory</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {% for id, group in groups|dictsort %}
+
+    {% if group['state']['type'] == 'passing' %}
+      {% set tr_class="" %}
+    {% elif group['state']['type'] == 'warning' %}
+      {% set tr_class="warning" %}
+    {% else %}
+      {% set tr_class="danger" %}
+    {% endif %}
+
+
+    <tr class="clickable-row {{tr_class}}" data-href="/groups/{{id}}" style="cursor: pointer;">
+      <td>{{ group['id'] }}</td>
+      <td>{{ group['name'] }}</td>
+      <td>{{ group['type'] }}</td>
+      <td>{{ group['memsize'] }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% endblock %}
+
+
+{% block scripts %}
+{{super()}}
+<script "text/javascript">
+$(document).ready(function($) {
+    $(".clickable-row").click(function() {
+        window.document.location = $(this).data("href");
+    });
+});
+</script>
+
+{% endblock %}

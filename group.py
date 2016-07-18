@@ -35,7 +35,7 @@ class Group(object):
         if self.group_id in allocations:
             return allocations[self.group_id]
         else:
-            return None
+            return {"instances": {}}
 
     @property
     def services(self):
@@ -44,7 +44,7 @@ class Group(object):
         if self.group_id in services:
             return services[self.group_id]
         else:
-            return None
+            return {"instances": {}}
 
     @property
     def containers(self):
@@ -53,4 +53,4 @@ class Group(object):
         if self.group_id in containers:
             return containers[self.group_id]
         else:
-            return None
+            return {"instances": {}}
