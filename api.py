@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+from gevent import monkey
+monkey.patch_all()
+
 import os
 import sys
 import re
@@ -195,7 +198,7 @@ class Api(object):
                                                 host_config=host_config,
                                                 networking_config=networking_config,
                                                 environment=environment,
-                                                labels=['memcached'])
+                                                labels=['tarantool'])
 
         docker_obj.connect_container_to_network(container.get('Id'),
                                                 'macvlan',
@@ -291,7 +294,8 @@ class Api(object):
                                                 service_id=instance_id,
                                                 address=ipaddr,
                                                 port=3301,
-                                                check=check)
+                                                check=check,
+                                                tags=['tarantool'])
 
     def unallocate_tarantool_service(self, instance_id):
         kv = self.consul.kv

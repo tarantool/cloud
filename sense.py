@@ -35,7 +35,7 @@ class Sense(object):
         services = {}
 
         for service_name in service_names:
-             services[service_name] = consul_obj.health.service(service_name)[1]
+            services[service_name] = consul_obj.health.service(service_name)[1]
 
         containers = {}
         for entry in services['docker']:

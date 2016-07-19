@@ -12,6 +12,7 @@ import memcached
 import sense
 import global_env
 import logging
+import consul
 from gevent.wsgi import WSGIServer
 import flask
 from flask import Flask
@@ -221,7 +222,6 @@ def show_group(group_id):
 
 @app.route('/groups', methods=['POST'])
 def create_group():
-    print("Form: ", str(flask.request.form))
     name=flask.request.form['name']
 
     try:
@@ -240,6 +240,55 @@ def delete_group(group_id):
     memc.delete()
 
     return flask.redirect("/groups")
+
+@app.route('/network', methods=['GET', 'POST'])
+def network_settings():
+    consul_obj = consul.Consul(host=global_env.consul_host)
+    kv = consul_obj.kv.get('tarantool_settings', recurse=True)[1] or []
+    settings = {'network_name': None, 'subnet': None}
+    for item in kv:
+        if item['Key'].endswith('/network_name'):
+            settings['network_name'] = item['Value'].decode('ascii')
+        if item['Key'].endswith('/subnet'):
+            settings['subnet'] = item['Value'].decode('ascii')
+
+    print(settings)
+    print("KV: ", str(kv))
+
+    if flask.request.method == 'POST':
+        error = None
+        network_name = flask.request.form.get('network_name')
+        subnet = flask.request.form.get('subnet')
+
+        try:
+            decoded_subnet = ipaddress.ip_network(subnet)
+        except ValueError:
+            decoded_subnet = None
+
+        if network_name == None:
+            error = 'Network name not specified'
+        elif subnet == None:
+            error = 'Subnet not specified'
+        elif not decoded_subnet:
+            error = 'Subnet is invalid'
+
+        print("Post: ", str(flask.request.form))
+        print("Error: ", error)
+        print("Subnet: ", str(decoded_subnet))
+
+        if not error:
+            consul_obj.kv.put('tarantool_settings/network_name', network_name)
+            consul_obj.kv.put('tarantool_settings/subnet', str(decoded_subnet))
+
+        return flask.redirect(flask.url_for('network_settings',
+                                            error=error))
+    else:
+        error = flask.request.args.get("error")
+        return flask.render_template('network.html',
+                                     settings=settings, error=error)
+
+
+
 
 
 
