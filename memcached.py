@@ -238,6 +238,11 @@ class Memcached(group.Group):
         memsize = blueprint['memsize']
         docker_host = allocation['instances'][instance_num]['host']
 
+        network_settings = Sense.network_settings()
+        network_name = network_settings['network_name']
+        if not network_name:
+            raise RuntimeError("Network name is not specified in settings")
+
         replica_ip = None
         if instance_num == '2':
             replica_ip = blueprint['instances']['1']['addr']
@@ -277,7 +282,7 @@ class Memcached(group.Group):
         networking_config = {
             'EndpointsConfig':
             {
-                'macvlan':
+                network_name:
                 {
                     'IPAMConfig':
                     {

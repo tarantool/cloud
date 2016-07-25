@@ -2,5 +2,6 @@
 
 consul_host = None
 kv = []
+settings = []
 services = {}
 containers = {}

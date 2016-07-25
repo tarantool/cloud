@@ -29,29 +29,10 @@ def allocate_ip(skip=[]):
     global CACHE_LOCK
 
     docker_nodes = [h for h in Sense.docker_hosts() if h['status'] == 'passing']
-
-    alloc_ranges = []
-    for node in docker_nodes:
-        docker_obj = docker.Client(base_url=node['addr'])
-        try:
-            network = docker_obj.inspect_network('macvlan')
-        except:
-            raise RuntimeError("Network 'macvlan' not found on '%s'" % node[1])
-
-        try:
-            iprange = network['IPAM']['Config'][0]['IPRange']
-        except:
-            raise RuntimeError(
-                "IP ranges not configured for 'macvlan' on '%s'" % node[1])
-        alloc_ranges.append(iprange)
-
-    if len(set(alloc_ranges)) == 0:
-        raise RuntimeError("Can't allocate IP address")
-
-    if len(set(alloc_ranges)) > 1:
-        raise RuntimeError('Different IP ranges set up on docker hosts: %s' %
-                           str(set(alloc_ranges)))
-
+    network_settings = Sense.network_settings()
+    subnet = network_settings['subnet']
+    if not subnet:
+        raise RuntimeError("Subnet is not specified in settings")
 
     invalidate_cache()
     with CACHE_LOCK:
@@ -60,7 +41,6 @@ def allocate_ip(skip=[]):
         for blueprint in Sense.blueprints().values():
             for instance in blueprint['instances'].values():
                 allocated_ips.add(instance['addr'])
-        subnet = alloc_ranges[0]
         net = ipaddress.ip_network(subnet)
 
         except_list = allocated_ips.union(set(skip))

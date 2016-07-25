@@ -29,7 +29,7 @@ class Sense(object):
     def update(cls):
         consul_obj = consul.Consul(host=global_env.consul_host)
         kv = consul_obj.kv.get('tarantool', recurse=True)[1] or []
-
+        settings = consul_obj.kv.get('tarantool_settings', recurse=True)[1] or []
         service_names = consul_obj.catalog.services()[1].keys()
 
         services = {}
@@ -51,6 +51,7 @@ class Sense(object):
 
 
         global_env.kv = kv
+        global_env.settings = settings
         global_env.services = services
         global_env.containers = containers
 
@@ -212,6 +213,20 @@ class Sense(object):
             result.append({'addr': service_addr+':'+str(port),
                            'consul_host': entry['Node']['Address'],
                            'status': status})
+
+        return result
+
+    @classmethod
+    def network_settings(cls):
+        tarantool_kv = consul_kv_to_dict(global_env.settings)
+        result = {'network_name': None, 'subnet': None}
+
+        for key, value in tarantool_kv.items():
+            if key == 'tarantool_settings/network_name':
+                result['network_name'] = value
+
+            if key == 'tarantool_settings/subnet':
+                result['subnet'] = value
 
         return result
 
