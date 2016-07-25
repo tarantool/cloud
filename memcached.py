@@ -126,7 +126,7 @@ class Memcached(group.Group):
         blueprint = self.blueprint
 
         memc1_host = blueprint['instances']['1']['addr']
-        memc2_host = blueprint['instances']['1']['addr']
+        memc2_host = blueprint['instances']['2']['addr']
 
         logging.info("Enabling replication between '%s' and '%s'",
                      memc1_host, memc2_host)
@@ -185,7 +185,7 @@ class Memcached(group.Group):
 
         check = {
             'docker_container_id': instance_id,
-            'shell': "/bin/bash",
+            'shell': "/bin/sh",
             'script': "/var/lib/mon.d/tarantool_replication.sh",
             'interval': "%ds" % check_period,
             'status' : 'warning'
@@ -253,7 +253,7 @@ class Memcached(group.Group):
                          instance_id, docker_obj.base_url, addr, replica_ip)
 
 
-        target_app ='/var/lib/tarantool/app.lua'
+        target_app ='/opt/tarantool/app.lua'
         src_app = '/opt/tarantool_cloud/app.lua'
 
         target_mon = '/var/lib/mon.d'
@@ -272,7 +272,7 @@ class Memcached(group.Group):
                 }
             })
 
-        cmd = 'tarantool /var/lib/tarantool/app.lua'
+        cmd = 'tarantool /opt/tarantool/app.lua'
 
         networking_config = {
             'EndpointsConfig':
@@ -295,7 +295,7 @@ class Memcached(group.Group):
         environment['ARENA'] = memsize
 
         if replica_ip:
-            environment['REPLICA'] = replica_ip + ':3302'
+            environment['TARANTOOL_REPLICATION_SOURCE'] = replica_ip + ':3302'
 
         container = docker_obj.create_container(image='tarantool/tarantool:latest',
                                                 name=instance_id,

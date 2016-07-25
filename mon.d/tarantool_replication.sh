@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 replication_status=$(tarantool <<-'EOF'
 os = require("os")
