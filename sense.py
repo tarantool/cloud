@@ -38,6 +38,7 @@ class Sense(object):
             services[service_name] = consul_obj.health.service(service_name)[1]
 
         containers = {}
+        docker_info = {}
         for entry in services['docker']:
             statuses = [check['Status'] for check in entry['Checks']]
 
@@ -49,11 +50,14 @@ class Sense(object):
                 containers[entry['Node']['Address']] = \
                     docker_obj.containers(all=True)
 
+                docker_info[entry['Node']['Address']] = \
+                    docker_obj.info()
 
         global_env.kv = kv
         global_env.settings = settings
         global_env.services = services
         global_env.containers = containers
+        global_env.docker_info = docker_info
 
     @classmethod
     def blueprints(cls):
@@ -209,10 +213,20 @@ class Sense(object):
 
             service_addr = entry['Service']['Address'] or entry['Node']['Address']
             port = entry['Service']['Port']
+            consul_host = entry['Node']['Address']
+            cpus = None
+            memory = None
+            if consul_host in global_env.docker_info:
+                info = global_env.docker_info[consul_host]
+
+                cpus = info['NCPU']
+                memory = float(info['MemTotal']) / (1024**3)
 
             result.append({'addr': service_addr+':'+str(port),
-                           'consul_host': entry['Node']['Address'],
-                           'status': status})
+                           'consul_host': consul_host,
+                           'status': status,
+                           'cpus': cpus,
+                           'memory': memory})
 
         return result
 

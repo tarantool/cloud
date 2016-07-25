@@ -5,3 +5,4 @@ kv = []
 settings = []
 services = {}
 containers = {}
+docker_info = {}

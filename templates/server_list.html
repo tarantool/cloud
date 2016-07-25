@@ -26,6 +26,8 @@
       <th>Address</th>
       <th>Consul Host</th>
       <th>Status</th>
+      <th>CPUs</th>
+      <th>Memory</th>
     </tr>
   </thead>
 
@@ -40,11 +42,24 @@
       {% set tr_class="danger" %}
     {% endif %}
 
+    {% if server['cpus'] %}
+      {% set cpus = server['cpus'] %}
+    {% else %}
+      {% set cpus = 'Unknown' %}
+    {% endif %}
+
+    {% if server['memory'] %}
+      {% set memory = "{0:0.1f} GiB".format(server['memory']) %}
+    {% else %}
+      {% set memory = 'Unknown' %}
+    {% endif %}
 
     <tr class="{{tr_class}}">
       <td>{{ server['addr'] }}</td>
       <td>{{ server['consul_host'] }}</td>
       <td>{{ server['status'] }}</td>
+      <td>{{ cpus }}</td>
+      <td>{{ memory }}</td>
     </tr>
   {% endfor %}
   </tbody>

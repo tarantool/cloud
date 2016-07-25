@@ -11,6 +11,7 @@ import docker
 import uuid
 import time
 import tarantool
+import allocate
 
 class Memcached(group.Group):
     def __init__(self, consul_host, group_id):
@@ -69,22 +70,13 @@ class Memcached(group.Group):
 
         blueprint = self.blueprint
 
-        docker_hosts = [h for h in Sense.docker_hosts()
-                        if h['status'] == 'passing']
+        host1 = allocate.allocate(blueprint['memsize'])
+        host2 = allocate.allocate(blueprint['memsize'], anti_affinity=[host1])
 
-        if len(docker_hosts) >= 2:
-            pick = random.sample(docker_hosts, 2)
-        elif len(docker_hosts) == 1:
-            pick = docker_hosts * 2
-        else:
-            raise RuntimeError("There are no healthy docker nodes")
-
-        for i, instance_id in enumerate(blueprint['instances']):
-            consul_host = pick[i]['consul_host']
-
-            kv.put('tarantool/%s/allocation/instances/%s/host' %
-                   (self.group_id, instance_id),
-                   consul_host)
+        kv.put('tarantool/%s/allocation/instances/1/host' %
+               self.group_id, host1)
+        kv.put('tarantool/%s/allocation/instances/2/host' %
+               self.group_id, host2)
 
     def unallocate(self):
         consul_obj = consul.Consul(host=global_env.consul_host)
@@ -297,7 +289,7 @@ class Memcached(group.Group):
 
         environment = {}
 
-        environment['ARENA'] = memsize
+        environment['TARANTOOL_SLAB_ALLOC_ARENA'] = memsize
 
         if replica_ip:
             environment['TARANTOOL_REPLICATION_SOURCE'] = replica_ip + ':3302'
