@@ -1,6 +1,7 @@
 #!/usr/bin/env tarantool
 
 http = require('http.server')
+prometheus = require('tarantool-prometheus')
 
 local replica = os.getenv('REPLICA')
 local arena = tonumber(os.getenv('ARENA')) or 0.5
@@ -32,18 +33,7 @@ instance = memcached.create('instance', '0.0.0.0:' .. tostring(EXPOSED_PORT))
 
 httpd = http.new('0.0.0.0', 8080)
 
-function check(self)
-    return {
-        status = 200,
-        headers = { ['content-type'] = 'text/html; charset=utf8' },
-        body = [[
-            <html>
-                <body>OK</body>
-            </html>
-        ]]
-    }
-end
+prometheus.init()
 
-httpd:route(
-     { path = '/ping' }, check)
+httpd:route( { path = '/metrics' }, prometheus.collect_http)
 httpd:start()
