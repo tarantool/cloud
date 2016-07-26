@@ -26,8 +26,10 @@
       <th>Address</th>
       <th>Consul Host</th>
       <th>Status</th>
-      <th>CPUs</th>
-      <th>Memory</th>
+      <th style="text-align: right;">CPUs</th>
+      <th style="text-align: right;"> Total Memory, GiB</th>
+      <th style="text-align: right;"> Used Memory, GiB</th>
+
     </tr>
   </thead>
 
@@ -49,7 +51,7 @@
     {% endif %}
 
     {% if server['memory'] %}
-      {% set memory = "{0:0.1f} GiB".format(server['memory']) %}
+      {% set memory = "{0:0.1f}".format(server['memory']) %}
     {% else %}
       {% set memory = 'Unknown' %}
     {% endif %}
@@ -58,8 +60,9 @@
       <td>{{ server['addr'] }}</td>
       <td>{{ server['consul_host'] }}</td>
       <td>{{ server['status'] }}</td>
-      <td>{{ cpus }}</td>
-      <td>{{ memory }}</td>
+      <td align="right">{{ cpus }}</td>
+      <td align="right">{{ memory }}</td>
+      <td align="right">{{ server['used_memory'] }}</td>
     </tr>
   {% endfor %}
   </tbody>

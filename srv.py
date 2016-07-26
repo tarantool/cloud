@@ -202,8 +202,28 @@ def setup_routes():
 @app.route('/servers')
 def list_servers():
     servers = sense.Sense.docker_hosts()
+    blueprints = sense.Sense.blueprints()
+    allocations = sense.Sense.allocations()
 
-    return flask.render_template('server_list.html', servers=servers)
+    result = []
+
+    for server in servers:
+        addr = server['addr'].split(':')[0]
+        used_mem = 0
+        for group_id, allocation in allocations.items():
+            blueprint = blueprints[group_id]
+            for instance in allocation['instances'].values():
+                if addr == instance['host']:
+                    used_mem = used_mem + blueprint['memsize']
+
+        result.append({'status': server['status'],
+                       'cpus': server['cpus'],
+                       'memory': server['memory'],
+                       'used_memory': used_mem,
+                       'addr': server['addr'],
+                       'consul_host': server['consul_host']})
+
+    return flask.render_template('server_list.html', servers=result)
 
 @app.route('/groups', methods=['GET'])
 @app.route('/', methods=['GET'])

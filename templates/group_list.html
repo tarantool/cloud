@@ -42,7 +42,7 @@
       <th>ID</th>
       <th>Name</th>
       <th>Type</th>
-      <th>Memory</th>
+      <th style="text-align: right;">Memory, GiB</th>
     </tr>
   </thead>
 
@@ -62,7 +62,7 @@
       <td>{{ group['id'] }}</td>
       <td>{{ group['name'] }}</td>
       <td>{{ group['type'] }}</td>
-      <td>{{ group['memsize'] }}</td>
+      <td align="right">{{ group['memsize'] }}</td>
     </tr>
   {% endfor %}
   </tbody>
