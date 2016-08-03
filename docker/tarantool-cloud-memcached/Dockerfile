@@ -1,0 +1,6 @@
+FROM tarantool/tarantool
+
+COPY tarantool_replication.sh /var/lib/mon.d
+COPY app.lua /opt/tarantool
+
+CMD ["tarantool", "/opt/tarantool/app.lua"]

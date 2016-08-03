@@ -27,7 +27,9 @@ def combine_consul_statuses(statuses):
 class Sense(object):
     @classmethod
     def update(cls):
-        consul_obj = consul.Consul(host=global_env.consul_host)
+        consul_obj = consul.Consul(host=global_env.consul_host,
+                                   token=global_env.consul_acl_token)
+
         kv = consul_obj.kv.get('tarantool', recurse=True)[1] or []
         settings = consul_obj.kv.get('tarantool_settings', recurse=True)[1] or []
         service_names = consul_obj.catalog.services()[1].keys()
@@ -36,6 +38,8 @@ class Sense(object):
 
         for service_name in service_names:
             services[service_name] = consul_obj.health.service(service_name)[1]
+
+        nodes = consul_obj.catalog.nodes()[1] or []
 
         containers = {}
         docker_info = {}
@@ -46,7 +50,8 @@ class Sense(object):
                 addr = entry['Service']['Address'] or entry['Node']['Address']
                 port = entry['Service']['Port']
 
-                docker_obj = docker.Client(base_url=addr+':'+str(port))
+                docker_obj = docker.Client(base_url=addr+':'+str(port),
+                                           tls=global_env.docker_tls_config)
                 containers[entry['Node']['Address']] = \
                     docker_obj.containers(all=True)
 
@@ -58,6 +63,7 @@ class Sense(object):
         global_env.services = services
         global_env.containers = containers
         global_env.docker_info = docker_info
+        global_env.nodes = nodes
 
     @classmethod
     def blueprints(cls):
@@ -178,6 +184,10 @@ class Sense(object):
     @classmethod
     def containers(cls):
         groups = {}
+
+        network_settings = cls.network_settings()
+        network_name = network_settings['network_name']
+
         for host in global_env.containers:
             for container in global_env.containers[host]:
                 if 'tarantool' not in container['Labels']:
@@ -185,8 +195,8 @@ class Sense(object):
 
                 instance_name = container['Names'][0].lstrip('/')
                 group, instance_id = instance_name.split('_')
-                macvlan = container['NetworkSettings']['Networks']['macvlan']
-                addr = macvlan['IPAMConfig']['IPv4Address']
+                net = container['NetworkSettings']['Networks'][network_name]
+                addr = net['IPAMConfig']['IPv4Address']
                 is_running = container['State'] == 'running'
 
                 if group not in groups:
@@ -250,22 +260,21 @@ class Sense(object):
             return []
 
         result = []
-        for entry in global_env.services['consul']:
-            statuses = [check['Status'] for check in entry['Checks']]
-            status = combine_consul_statuses(statuses)
+        for entry in global_env.nodes:
+            service_addr = entry['Address']
+            name = entry['Node']
 
-            service_addr = entry['Service']['Address'] or entry['Node']['Address']
-            port = entry['Service']['Port']
-
-            result.append({'addr': service_addr+':'+str(port),
-                           'status': status})
+            result.append({'addr': service_addr+':8300',
+                           'name': name,
+                           'status': 'passing'})
 
         return result
 
     @classmethod
     def consul_kv_refresh(cls):
         index = None
-        consul_obj = consul.Consul(host=global_env.consul_host)
+        consul_obj = consul.Consul(host=global_env.consul_host,
+                                   token=global_env.consul_acl_token)
 
         while True:
             try:
@@ -280,7 +289,8 @@ class Sense(object):
     @classmethod
     def consul_service_refresh(cls):
         index = None
-        consul_obj = consul.Consul(host=global_env.consul_host)
+        consul_obj = consul.Consul(host=global_env.consul_host,
+                                   token=global_env.consul_acl_token)
 
         while True:
             try:

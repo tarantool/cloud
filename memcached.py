@@ -27,7 +27,8 @@ class Memcached(group.Group):
     def create(cls, name, memsize, check_period):
         group_id = uuid.uuid4().hex
 
-        consul_obj = consul.Consul(host=global_env.consul_host)
+        consul_obj = consul.Consul(host=global_env.consul_host,
+                                   token=global_env.consul_acl_token)
         kv = consul_obj.kv
 
         ip1 = ip_pool.allocate_ip()
@@ -65,7 +66,8 @@ class Memcached(group.Group):
         Sense.update()
 
     def allocate(self):
-        consul_obj = consul.Consul(host=global_env.consul_host)
+        consul_obj = consul.Consul(host=global_env.consul_host,
+                                   token=global_env.consul_acl_token)
         kv = consul_obj.kv
 
         blueprint = self.blueprint
@@ -79,7 +81,8 @@ class Memcached(group.Group):
                self.group_id, host2)
 
     def unallocate(self):
-        consul_obj = consul.Consul(host=global_env.consul_host)
+        consul_obj = consul.Consul(host=global_env.consul_host,
+                                   token=global_env.consul_acl_token)
         kv = consul_obj.kv
 
         logging.info("Unallocating '%s'", self.group_id)
@@ -104,7 +107,8 @@ class Memcached(group.Group):
         self.remove_container("2")
 
     def remove_blueprint(self):
-        consul_obj = consul.Consul(host=global_env.consul_host)
+        consul_obj = consul.Consul(host=global_env.consul_host,
+                                   token=global_env.consul_acl_token)
         kv = consul_obj.kv
 
         logging.info("Removing blueprint '%s'", self.group_id)
@@ -173,7 +177,8 @@ class Memcached(group.Group):
         addr = blueprint['instances'][instance_num]['addr']
         check_period = blueprint['check_period']
 
-        consul_obj = consul.Consul(host=consul_host)
+        consul_obj = consul.Consul(host=consul_host,
+                                   token=global_env.consul_acl_token)
 
         check = {
             'docker_container_id': instance_id,
@@ -214,7 +219,8 @@ class Memcached(group.Group):
                              instance_id,
                              consul_host)
 
-                consul_obj = consul.Consul(host=consul_host)
+                consul_obj = consul.Consul(host=consul_host,
+                                           token=global_env.consul_acl_token)
                 consul_obj.agent.service.deregister(instance_id)
         else:
             logging.info("Not unregistering '%s', as it's not registered",
@@ -228,18 +234,29 @@ class Memcached(group.Group):
         instance_id = self.group_id + '_' + instance_num
         addr = blueprint['instances'][instance_num]['addr']
         memsize = blueprint['memsize']
-        docker_host = allocation['instances'][instance_num]['host']
-
         network_settings = Sense.network_settings()
         network_name = network_settings['network_name']
         if not network_name:
             raise RuntimeError("Network name is not specified in settings")
 
+        docker_host = allocation['instances'][instance_num]['host']
+        docker_hosts = Sense.docker_hosts()
+
+        docker_addr = None
+        for host in docker_hosts:
+            if host['addr'].split(':')[0] == docker_host or \
+               host['consul_host'] == docker_host:
+                docker_addr = host['addr']
+
+        if not docker_addr:
+            raise RuntimeError("No such Docker host: '%s'" % docker_host)
+
         replica_ip = None
         if instance_num == '2':
             replica_ip = blueprint['instances']['1']['addr']
 
-        docker_obj = docker.Client(base_url=docker_host+':2375')
+        docker_obj = docker.Client(base_url=docker_addr,
+                                   tls=global_env.docker_tls_config)
 
         if not replica_ip:
             logging.info("Creating memcached '%s' on '%s' with ip '%s'",
@@ -294,16 +311,16 @@ class Memcached(group.Group):
         if replica_ip:
             environment['TARANTOOL_REPLICATION_SOURCE'] = replica_ip + ':3302'
 
-        container = docker_obj.create_container(image='tarantool/tarantool:latest',
+        container = docker_obj.create_container(image='tarantool-cloud-memcached',
                                                 name=instance_id,
                                                 command=cmd,
-                                                host_config=host_config,
+#                                                host_config=host_config,
                                                 networking_config=networking_config,
                                                 environment=environment,
                                                 labels=['tarantool'])
 
         docker_obj.connect_container_to_network(container.get('Id'),
-                                                'macvlan',
+                                                network_name,
                                                 ipv4_address=addr)
         docker_obj.start(container=container.get('Id'))
 
@@ -317,19 +334,27 @@ class Memcached(group.Group):
         instance_id = self.group_id + '_' + instance_num
         docker_hosts = [h['addr'].split(':')[0] for h in Sense.docker_hosts()
                         if h['status'] == 'passing']
-        print("Docker hosts: ", docker_hosts)
 
         if containers:
             docker_host = containers['instances'][instance_num]['host']
+            docker_hosts = Sense.docker_hosts()
 
-            if docker_host in docker_hosts:
-                logging.info("Removing container '%s' from '%s'",
-                             instance_id,
-                             docker_host)
+            docker_addr = None
+            for host in docker_hosts:
+                if host['addr'].split(':')[0] == docker_host or \
+                   host['consul_host'] == docker_host:
+                    docker_addr = host['addr']
+            if not docker_addr:
+                raise RuntimeError("No such Docker host: '%s'" % docker_host)
 
-                docker_obj = docker.Client(base_url=docker_host+':2375')
-                docker_obj.stop(container=instance_id)
-                docker_obj.remove_container(container=instance_id)
+            logging.info("Removing container '%s' from '%s'",
+                         instance_id,
+                         docker_host)
+
+            docker_obj = docker.Client(base_url=docker_addr,
+                                       tls=global_env.docker_tls_config)
+            docker_obj.stop(container=instance_id)
+            docker_obj.remove_container(container=instance_id)
         else:
             logging.info("Not removing container '%s', as it doesn't exist",
                          instance_id)

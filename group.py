@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import consul
+import global_env
 from sense import Sense
 
 class GroupNotFoundError(RuntimeError):
@@ -9,7 +10,8 @@ class GroupNotFoundError(RuntimeError):
 class Group(object):
     def __init__(self, consul_host, group_id):
         self.consul_host = consul_host
-        self.consul = consul.Consul(host=consul_host)
+        self.consul = consul.Consul(host=consul_host,
+                                    token=global_env.consul_acl_token)
         self.group_id = group_id
 
         blueprints = Sense.blueprints()

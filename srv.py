@@ -13,6 +13,7 @@ import sense
 import global_env
 import logging
 import consul
+import docker
 from gevent.wsgi import WSGIServer
 import flask
 from flask import Flask
@@ -263,7 +264,8 @@ def delete_group(group_id):
 
 @app.route('/network', methods=['GET', 'POST'])
 def network_settings():
-    consul_obj = consul.Consul(host=global_env.consul_host)
+    consul_obj = consul.Consul(host=global_env.consul_host,
+                               token=global_env.consul_acl_token)
     kv = consul_obj.kv.get('tarantool_settings', recurse=True)[1] or []
     settings = {'network_name': None, 'subnet': None}
     for item in kv:
@@ -324,12 +326,37 @@ def main():
     else:
         sys.exit("Please specify CONSUL_HOST via env")
 
+    docker_client_cert = None
+    docker_server_cert = None
+    if 'DOCKER_CLIENT_CERT' in os.environ:
+        if not 'DOCKER_CLIENT_KEY' in os.environ:
+            sys.exit("Please specify DOCKER_CLIENT_KEY via env")
+
+        docker_client_cert = (os.path.expanduser(os.environ['DOCKER_CLIENT_CERT']),
+                              os.path.expanduser(os.environ['DOCKER_CLIENT_KEY']))
+    if 'DOCKER_SERVER_CERT' in os.environ:
+        if not docker_client_cert:
+            sys.exit("Please specify DOCKER_CLIENT_CERT via env")
+        docker_server_cert = os.path.expanduser(os.environ['DOCKER_SERVER_CERT'])
+
+    docker_tls_config = None
+    if docker_client_cert or docker_server_cert:
+        docker_tls_config = docker.tls.TLSConfig(
+            client_cert=docker_client_cert,
+            verify=docker_server_cert
+        )
+    global_env.docker_tls_config = docker_tls_config
+
+    if 'CONSUL_ACL_TOKEN' in os.environ:
+        global_env.consul_acl_token = os.environ['CONSUL_ACL_TOKEN']
+
     setup_routes()
 
     sense.Sense.update()
 
     gevent.spawn(sense.Sense.timer_update)
 
+    print("containers: ", sense.Sense.containers())
 
     http_server = WSGIServer(('', 5000), app)
     http_server.serve_forever()
