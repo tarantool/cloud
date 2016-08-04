@@ -117,55 +117,45 @@ class Memcached(group.Group):
                   recurse=True)
 
     def enable_replication(self):
-        port = 3302
+        port = 3301
 
         blueprint = self.blueprint
+        allocation = self.allocation
 
-        memc1_host = blueprint['instances']['1']['addr']
-        memc2_host = blueprint['instances']['2']['addr']
+        for instance_num in allocation['instances']:
+            other_instances = \
+                set(allocation['instances'].keys()) - set([instance_num])
 
-        logging.info("Enabling replication between '%s' and '%s'",
-                     memc1_host, memc2_host)
+            addr = blueprint['instances'][instance_num]['addr']
+            other_addrs = [blueprint['instances'][i]['addr']
+                           for i in other_instances]
+            docker_host = allocation['instances'][instance_num]['host']
+            docker_hosts = Sense.docker_hosts()
 
-        timeout = time.time() + 10
-        while time.time() < timeout:
-            try:
-                memc1 = tarantool.Connection(memc1_host, 3302)
-                memc2 = tarantool.Connection(memc2_host, 3302)
-                break
-            except:
-                pass
-            time.sleep(0.5)
+            logging.info("Enabling replication between '%s' and '%s'",
+                         addr, str(other_addrs))
 
-        if time.time() > timeout:
-            raise RuntimeError("Failed to enable replication between '%s' and '%s'" %
-                               (memc1_host, memc2_host))
+            docker_addr = None
+            for host in docker_hosts:
+                if host['addr'].split(':')[0] == docker_host or \
+                   host['consul_host'] == docker_host:
+                    docker_addr = host['addr']
 
-        cmd = "box.cfg{replication_source=\"%s:%d\"}"
 
-        memc1_repl_status = memc1.eval("return box.info.replication['status']")
-        memc2_repl_status = memc2.eval("return box.info.replication['status']")
+            docker_obj = docker.Client(base_url=docker_addr,
+                                       tls=global_env.docker_tls_config)
 
-        if 'follow' not in memc1_repl_status:
-            memc1.eval(cmd % (memc2_host, port))
+            cmd = "tarantool_set_config.lua TARANTOOL_REPLICATION_SOURCE " + \
+                  ",".join(other_addrs)
 
-        if 'follow' not in memc2_repl_status:
-            memc2.eval(cmd % (memc1_host, port))
+            exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
+                                             cmd)
+            docker_obj.exec_start(exec_id)
+            ret = docker_obj.exec_inspect(exec_id)
 
-        timeout = time.time() + 10
-        while time.time() < timeout:
-            memc1_repl_status = memc1.eval("return box.info.replication['status']")
-            memc2_repl_status = memc2.eval("return box.info.replication['status']")
-
-            if 'follow' in memc1_repl_status and 'follow' in memc2_repl_status:
-                break
-            time.sleep(0.5)
-
-        if 'follow' not in memc1_repl_status:
-            raise RuntimeError("Failed to enable replication on '%s'" % memcached1)
-
-        if 'follow' not in memc2_repl_status:
-            raise RuntimeError("Failed to enable replication on '%s'" % memcached2)
+            if ret['ExitCode'] != 0:
+                raise RuntimeError("Failed to enable replication for group " +
+                                   self.group_id)
 
 
     def register_instance(self, instance_num):
@@ -309,7 +299,7 @@ class Memcached(group.Group):
         environment['TARANTOOL_SLAB_ALLOC_ARENA'] = memsize
 
         if replica_ip:
-            environment['TARANTOOL_REPLICATION_SOURCE'] = replica_ip + ':3302'
+            environment['TARANTOOL_REPLICATION_SOURCE'] = replica_ip + ':3301'
 
         container = docker_obj.create_container(image='tarantool-cloud-memcached',
                                                 name=instance_id,

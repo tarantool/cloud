@@ -3,31 +3,26 @@
 http = require('http.server')
 prometheus = require('tarantool-prometheus')
 
-local replica = os.getenv('REPLICA')
-local arena = tonumber(os.getenv('ARENA')) or 0.5
-local EXPOSED_PORT = 3301
-local ADMIN_PORT = 3302
+local EXPOSED_PORT = 11211
 local memcached = require('memcached')
 local fiber = require('fiber')
+local yaml = require('yaml')
+local fio = require('fio')
+local errno = require('errno')
 
-box.cfg{
-    slab_alloc_arena = arena;
+box.cfg {
     wal_mode = 'write';
-    listen = ADMIN_PORT;
-    replication_source = replica;
 }
 
-if replica == nil or replica == '' then
-    -- enable admin provison
-    box.schema.user.grant('guest', 'read,write,execute',
-                          'universe', nil, {if_not_exists=true})
-    box.schema.user.grant('guest', 'replication', nil, nil, {if_not_exists=true})
-else
-    -- wait for relay on init
-    while box.space.instance == nil do
-        fiber.sleep(0.1)
+box.once(
+    "memcached-init",
+    function()
+        box.schema.user.grant('guest', 'read,write,execute',
+                              'universe', nil, {if_not_exists=true})
+        box.schema.user.grant('guest', 'replication', nil, nil, {if_not_exists=true})
     end
-end
+)
+
 -- start memcached instance
 instance = memcached.create('instance', '0.0.0.0:' .. tostring(EXPOSED_PORT))
 

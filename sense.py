@@ -195,8 +195,10 @@ class Sense(object):
 
                 instance_name = container['Names'][0].lstrip('/')
                 group, instance_id = instance_name.split('_')
-                net = container['NetworkSettings']['Networks'][network_name]
-                addr = net['IPAMConfig']['IPv4Address']
+                addr = None
+                if network_name in container['NetworkSettings']['Networks']:
+                    net = container['NetworkSettings']['Networks'][network_name]
+                    addr = net['IPAMConfig']['IPv4Address'] + ':3301'
                 is_running = container['State'] == 'running'
 
                 if group not in groups:
@@ -204,7 +206,7 @@ class Sense(object):
                     groups[group]['instances'] = {}
 
                 groups[group]['instances'][instance_id] = {
-                    'addr': addr + ':3301',
+                    'addr': addr,
                     'host': host,
                     'is_running': is_running
                 }
