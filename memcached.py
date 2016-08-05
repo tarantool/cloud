@@ -270,24 +270,11 @@ class Memcached(group.Group):
                          " and replication source: '%s'",
                          instance_id, docker_obj.base_url, addr, replica_ip)
 
-
-        target_app ='/opt/tarantool/app.lua'
-        src_app = '/opt/tarantool_cloud/app.lua'
-
-        target_mon = '/var/lib/mon.d'
-        src_mon = '/opt/tarantool_cloud/mon.d'
-
         host_config = docker_obj.create_host_config(
-            binds =
+            restart_policy =
             {
-                src_app : {
-                    'bind' : target_app,
-                    'mode' : 'ro'
-                },
-                src_mon : {
-                    'bind' : target_mon,
-                    'mode' : 'ro'
-                }
+                "MaximumRetryCount": 0,
+                "Name": "unless-stopped"
             })
 
         cmd = 'tarantool /opt/tarantool/app.lua'
@@ -318,7 +305,7 @@ class Memcached(group.Group):
         container = docker_obj.create_container(image='tarantool-cloud-memcached',
                                                 name=instance_id,
                                                 command=cmd,
-#                                                host_config=host_config,
+                                                host_config=host_config,
                                                 networking_config=networking_config,
                                                 environment=environment,
                                                 labels=['tarantool'])
