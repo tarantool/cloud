@@ -242,7 +242,12 @@ def list_groups():
 
 @app.route('/groups/<group_id>', methods=['GET'])
 def show_group(group_id):
+    services = sense.Sense.services()
+    mem = max([i['mem_used']
+               for i in services[group_id]['instances'].values()])
     group = group_to_dict(group_id)
+    group['mem_used'] = mem
+
     return flask.render_template('group.html', group=group)
 
 @app.route('/groups', methods=['POST'])
