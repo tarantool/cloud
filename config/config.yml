@@ -1,0 +1,7 @@
+CONSUL_HOST: 127.0.0.1
+#DOCKER_CLIENT_KEY: /im/config/key.pem
+#DOCKER_CLIENT_CERT: /im/config/cert.pem
+#DOCKER_SERVER_CERT: /im/config/ca.pem
+#CONSUL_ACL_TOKEN: 6QTrYi2InPYJyfK7e50aCw==
+#HTTP_BASIC_USERNAME: admin
+#HTTP_BASIC_PASSWORD: ilikerandompasswords

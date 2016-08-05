@@ -14,17 +14,21 @@ import global_env
 import logging
 import consul
 import docker
+import argparse
+import yaml
+
 from gevent.wsgi import WSGIServer
 import flask
 from flask import Flask
 from flask_restful import reqparse, abort, Api, Resource
 from flask_bootstrap import Bootstrap
-
+from flask_basicauth import BasicAuth
 
 app = Flask(__name__)
 app.config['DEBUG'] = True
 api = Api(app)
 Bootstrap(app)
+BasicAuth(app)
 
 def abort_if_group_doesnt_exist(group_id):
     if group_id not in sense.Sense.blueprints():
@@ -325,7 +329,26 @@ def network_settings():
 
 
 
+def get_config(config_file):
+    cfg = {}
+    if config_file:
+        with open(config_file, 'r') as stream:
+            try:
+                cfg = yaml.load(stream)
+            except yaml.YAMLError as exc:
+                print("Failed to parse config file:\n" + str(exc))
+                sys.exit(1)
 
+    opts = ['CONSUL_HOST', 'DOCKER_CLIENT_CERT',
+            'DOCKER_SERVER_CERT', 'DOCKER_CLIENT_KEY',
+            'CONSUL_ACL_TOKEN', 'HTTP_BASIC_USERNAME',
+            'HTTP_BASIC_PASSWORD']
+
+    for opt in opts:
+        if opt in os.environ:
+            cfg[opt] = os.environ[opt]
+
+    return cfg
 
 
 def main():
@@ -335,23 +358,32 @@ def main():
     logging.basicConfig(format='%(levelname)s: %(message)s',
                         level=logging.INFO)
 
-    if 'CONSUL_HOST' in os.environ:
-        global_env.consul_host = os.environ['CONSUL_HOST']
-    else:
-        sys.exit("Please specify CONSUL_HOST via env")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--config')
+
+    args = parser.parse_args()
+
+    cfg = get_config(args.config)
+
+    global_env.consul_host = cfg.get('CONSUL_HOST', None)
+    global_env.consul_acl_token = cfg.get('CONSUL_ACL_TOKEN', None)
 
     docker_client_cert = None
     docker_server_cert = None
-    if 'DOCKER_CLIENT_CERT' in os.environ:
-        if not 'DOCKER_CLIENT_KEY' in os.environ:
-            sys.exit("Please specify DOCKER_CLIENT_KEY via env")
 
-        docker_client_cert = (os.path.expanduser(os.environ['DOCKER_CLIENT_CERT']),
-                              os.path.expanduser(os.environ['DOCKER_CLIENT_KEY']))
-    if 'DOCKER_SERVER_CERT' in os.environ:
+    if 'HTTP_BASIC_USERNAME' in cfg and 'HTTP_BASIC_PASSWORD' in cfg:
+        app.config['BASIC_AUTH_USERNAME'] = cfg['HTTP_BASIC_USERNAME']
+        app.config['BASIC_AUTH_PASSWORD'] = cfg['HTTP_BASIC_PASSWORD']
+        app.config['BASIC_AUTH_FORCE'] = True
+
+    if 'DOCKER_CLIENT_CERT' in cfg and 'DOCKER_CLIENT_KEY' in cfg:
+        docker_client_cert = (os.path.expanduser(cfg['DOCKER_CLIENT_CERT']),
+                              os.path.expanduser(cfg['DOCKER_CLIENT_KEY']))
+
+    if 'DOCKER_SERVER_CERT' in cfg:
         if not docker_client_cert:
-            sys.exit("Please specify DOCKER_CLIENT_CERT via env")
-        docker_server_cert = os.path.expanduser(os.environ['DOCKER_SERVER_CERT'])
+            sys.exit("Please specify DOCKER_CLIENT_CERT")
+        docker_server_cert = os.path.expanduser(cfg['DOCKER_SERVER_CERT'])
 
     docker_tls_config = None
     if docker_client_cert or docker_server_cert:
@@ -361,16 +393,11 @@ def main():
         )
     global_env.docker_tls_config = docker_tls_config
 
-    if 'CONSUL_ACL_TOKEN' in os.environ:
-        global_env.consul_acl_token = os.environ['CONSUL_ACL_TOKEN']
-
     setup_routes()
 
     sense.Sense.update()
 
     gevent.spawn(sense.Sense.timer_update)
-
-    print("containers: ", sense.Sense.containers())
 
     http_server = WSGIServer(('', 5000), app)
     http_server.serve_forever()
