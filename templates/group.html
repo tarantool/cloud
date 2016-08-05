@@ -27,6 +27,13 @@
   <div class="panel-body">
     <dl class="dl-horizontal">
       <dt>ID</dt><dd>{{group['id']}}</dd>
+      <dt>Created</dt>
+      <dd>
+        <script type="text/javascript">
+          d = new Date(Date.parse("{{group['creation_time']}}"))
+          document.write(d.toDateString() + " " + d.toTimeString().replace(/ .*/g,""))
+        </script>
+      </dd>
       <dt>memory limit</dt><dd>{{group['memsize']}}</dd>
       <dt>memory used</dt><dd>{{"{0:.3f}".format(group['mem_used'])}}</dd>
       <dt>type</dt><dd>{{group['type']}}</dd>

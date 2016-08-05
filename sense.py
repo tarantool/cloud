@@ -5,6 +5,7 @@ import consul
 import docker
 import re
 import time
+import dateutil.parser
 
 def consul_kv_to_dict(consul_kv_list):
     result = {}
@@ -93,13 +94,10 @@ class Sense(object):
             if match:
                 groups[match.group(1)]['memsize'] = float(value)
 
-        for key, value in tarantool_kv.items():
-            match = re.match('tarantool/(.*)/blueprint/instances/(.*)/addr', key)
+            match = re.match('tarantool/(.*)/blueprint/creation_time', key)
             if match:
-                groups[match.group(1)]['instances'][match.group(2)] = \
-                    {'addr': None}
+                groups[match.group(1)]['creation_time'] = dateutil.parser.parse(value)
 
-        for key, value in tarantool_kv.items():
             match = re.match('tarantool/(.*)/blueprint/name', key)
             if match:
                 groups[match.group(1)]['name'] = value
@@ -108,6 +106,13 @@ class Sense(object):
             if match:
                 groups[match.group(1)]['check_period'] = int(value)
 
+        for key, value in tarantool_kv.items():
+            match = re.match('tarantool/(.*)/blueprint/instances/(.*)/addr', key)
+            if match:
+                groups[match.group(1)]['instances'][match.group(2)] = \
+                    {'addr': None}
+
+        for key, value in tarantool_kv.items():
             match = re.match('tarantool/(.*)/blueprint/instances/(.*)/addr', key)
             if match:
                 group = match.group(1)
@@ -115,6 +120,8 @@ class Sense(object):
 
                 groups[group]['instances'][instance_id]['addr'] = \
                     value
+
+
 
         return groups
 

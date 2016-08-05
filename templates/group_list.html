@@ -39,6 +39,7 @@
 <table class="table table-hover">
   <thead>
     <tr>
+      <th>Created</th>
       <th>ID</th>
       <th>Name</th>
       <th>Type</th>
@@ -48,7 +49,7 @@
   </thead>
 
   <tbody>
-    {% for id, group in groups|dictsort %}
+    {% for group in groups| sort(reverse=True,attribute='creation_time') %}
 
     {% if group['state']['type'] == 'passing' %}
       {% set tr_class="" %}
@@ -59,7 +60,11 @@
     {% endif %}
 
 
-    <tr class="clickable-row {{tr_class}}" data-href="/groups/{{id}}" style="cursor: pointer;">
+    <tr class="clickable-row {{tr_class}}" data-href="/groups/{{group['id']}}" style="cursor: pointer;">
+      <td><script type="text/javascript">
+          d = new Date(Date.parse("{{group['creation_time']}}"))
+          document.write(d.toDateString() + " " + d.toTimeString().replace(/ .*/g,""))
+      </script></td>
       <td>{{ group['id'] }}</td>
       <td>{{ group['name'] }}</td>
       <td>{{ group['type'] }}</td>

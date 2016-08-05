@@ -12,6 +12,7 @@ import uuid
 import time
 import tarantool
 import allocate
+import datetime
 
 class Memcached(group.Group):
     def __init__(self, consul_host, group_id):
@@ -33,11 +34,13 @@ class Memcached(group.Group):
 
         ip1 = ip_pool.allocate_ip()
         ip2 = ip_pool.allocate_ip()
+        creation_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         kv.put('tarantool/%s/blueprint/type' % group_id, 'memcached')
         kv.put('tarantool/%s/blueprint/name' % group_id, name)
         kv.put('tarantool/%s/blueprint/memsize' % group_id, str(memsize))
         kv.put('tarantool/%s/blueprint/check_period' % group_id, str(check_period))
+        kv.put('tarantool/%s/blueprint/creation_time' % group_id, creation_time)
         kv.put('tarantool/%s/blueprint/instances/1/addr' % group_id, ip1)
         kv.put('tarantool/%s/blueprint/instances/2/addr' % group_id, ip2)
 

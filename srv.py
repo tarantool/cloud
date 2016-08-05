@@ -107,6 +107,7 @@ def group_to_dict(group_id):
               'id': group_id,
               'memsize': blueprint['memsize'],
               'type': blueprint['type'],
+              'creation_time': blueprint['creation_time'].isoformat(),
               'state': state_to_dict(state),
               'instances': instances}
 
@@ -234,17 +235,21 @@ def list_groups():
     result = {}
     for group_id in blueprints:
         result[group_id] = group_to_dict(group_id)
-        mem = max([i['mem_used']
-                   for i in services[group_id]['instances'].values()])
+        mem = 0
+        if group_id in services:
+            mem = max([i['mem_used']
+                       for i in services[group_id]['instances'].values()])
         result[group_id]['mem_used'] = mem
 
-    return flask.render_template('group_list.html', groups=result)
+    return flask.render_template('group_list.html', groups=result.values())
 
 @app.route('/groups/<group_id>', methods=['GET'])
 def show_group(group_id):
     services = sense.Sense.services()
-    mem = max([i['mem_used']
-               for i in services[group_id]['instances'].values()])
+    mem = 0
+    if group_id in services:
+        mem = max([i['mem_used']
+                   for i in services[group_id]['instances'].values()])
     group = group_to_dict(group_id)
     group['mem_used'] = mem
 
