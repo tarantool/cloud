@@ -165,6 +165,14 @@ class Sense(object):
                 port = entry['Service']['Port']
                 addr = '%s:%s' % (host, port)
                 node = entry['Node']['Address']
+                mem = 0
+
+                for check in entry['Checks']:
+                    if check['Name'] == 'Memory Utilization':
+                        try:
+                            mem = int(check['Output']) / (1024**3)
+                        except ValueError:
+                            pass
 
                 statuses = [check['Status'] for check in entry['Checks']]
                 status = combine_consul_statuses(statuses)
@@ -177,7 +185,8 @@ class Sense(object):
                 groups[group]['instances'][instance_id] = {
                     'addr': addr,
                     'status': status,
-                    'host': node}
+                    'host': node,
+                    'mem_used': mem}
 
         return groups
 

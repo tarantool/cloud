@@ -230,9 +230,13 @@ def list_servers():
 @app.route('/', methods=['GET'])
 def list_groups():
     blueprints = sense.Sense.blueprints()
+    services = sense.Sense.services()
     result = {}
     for group_id in blueprints:
         result[group_id] = group_to_dict(group_id)
+        mem = max([i['mem_used']
+                   for i in services[group_id]['instances'].values()])
+        result[group_id]['mem_used'] = mem
 
     return flask.render_template('group_list.html', groups=result)
 

@@ -170,10 +170,18 @@ class Memcached(group.Group):
         consul_obj = consul.Consul(host=consul_host,
                                    token=global_env.consul_acl_token)
 
-        check = {
+        replication_check = {
             'docker_container_id': instance_id,
             'shell': "/bin/sh",
             'script': "/var/lib/mon.d/tarantool_replication.sh",
+            'interval': "%ds" % check_period,
+            'status' : 'warning'
+        }
+
+        memory_check = {
+            'docker_container_id': instance_id,
+            'shell': "/bin/sh",
+            'script': "/var/lib/mon.d/tarantool_memory.sh",
             'interval': "%ds" % check_period,
             'status' : 'warning'
         }
@@ -186,8 +194,14 @@ class Memcached(group.Group):
                                                 service_id=instance_id,
                                                 address=addr,
                                                 port=3301,
-                                                check=check,
+                                                check=replication_check,
                                                 tags=['tarantool'])
+
+        ret = consul_obj.agent.check.register("Memory Utilization",
+                                              check=memory_check,
+                                              check_id=instance_id + '_memory',
+                                              service_id=instance_id)
+
 
     def unregister_instance(self, instance_num):
         services = self.services
