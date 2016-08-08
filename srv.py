@@ -365,6 +365,7 @@ def main():
 
     cfg = get_config(args.config)
 
+    listen_port = int(cfg.get('LISTEN_PORT', '5000'))
     global_env.consul_host = cfg.get('CONSUL_HOST', None)
     global_env.consul_acl_token = cfg.get('CONSUL_ACL_TOKEN', None)
 
@@ -399,7 +400,7 @@ def main():
 
     gevent.spawn(sense.Sense.timer_update)
 
-    http_server = WSGIServer(('', 5000), app)
+    http_server = WSGIServer(('', listen_port), app)
     http_server.serve_forever()
 
 
