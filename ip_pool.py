@@ -7,21 +7,24 @@ import docker
 from sense import Sense
 import re
 from gevent.lock import RLock
+import datetime
+import logging
+import time
 
-IP_CACHE = set()
+IP_CACHE = {}
 CACHE_LOCK = RLock()
+CACHE_EXPIRATION_TIME = 30
 
 def invalidate_cache():
     global IP_CACHE
     global CACHE_LOCK
 
+    now = datetime.datetime.now()
     with CACHE_LOCK:
-        allocated_ips = set()
-        for blueprint in Sense.blueprints().values():
-            for instance in blueprint['instances'].values():
-                allocated_ips.add(instance['addr'])
-        IP_CACHE = IP_CACHE - allocated_ips
-
+        for addr, created_time in IP_CACHE.items():
+            if (now - created_time).seconds > CACHE_EXPIRATION_TIME:
+                logging.info("Expiring cached address: %s", addr)
+                del IP_CACHE[addr]
 
 
 def allocate_ip(skip=[]):
@@ -36,7 +39,7 @@ def allocate_ip(skip=[]):
 
     invalidate_cache()
     with CACHE_LOCK:
-        allocated_ips = IP_CACHE.copy()
+        allocated_ips = set(IP_CACHE.keys())
         # collect instances from blueprints
         for blueprint in Sense.blueprints().values():
             for instance in blueprint['instances'].values():
@@ -45,8 +48,17 @@ def allocate_ip(skip=[]):
 
         except_list = allocated_ips.union(set(skip))
         for addr in net:
-            if str(addr) not in except_list:
-                IP_CACHE.add(str(addr))
+            if str(addr) not in except_list and\
+               not str(addr).endswith('.0'):
+                IP_CACHE[str(addr)] = datetime.datetime.now()
                 return str(addr)
 
     raise RuntimeError('IP Address range exhausted')
+
+def ip_cache_invalidation_loop():
+    while True:
+        try:
+            invalidate_cache()
+            time.sleep(10)
+        except Exception:
+            time.sleep(10)

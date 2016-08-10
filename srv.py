@@ -16,6 +16,7 @@ import consul
 import docker
 import argparse
 import yaml
+import ip_pool
 
 from gevent.wsgi import WSGIServer
 import flask
@@ -399,6 +400,7 @@ def main():
     sense.Sense.update()
 
     gevent.spawn(sense.Sense.timer_update)
+    gevent.spawn(ip_pool.ip_cache_invalidation_loop)
 
     http_server = WSGIServer(('', listen_port), app)
     http_server.serve_forever()
