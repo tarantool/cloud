@@ -286,6 +286,7 @@ def network_settings():
     consul_obj = consul.Consul(host=global_env.consul_host,
                                token=global_env.consul_acl_token)
     kv = consul_obj.kv.get('tarantool_settings', recurse=True)[1] or []
+    default = global_env.default_network_settings
     settings = {'network_name': None, 'subnet': None}
     for item in kv:
         if item['Key'].endswith('/network_name'):
@@ -293,8 +294,8 @@ def network_settings():
         if item['Key'].endswith('/subnet'):
             settings['subnet'] = item['Value'].decode('ascii')
 
-    print(settings)
-    print("KV: ", str(kv))
+    settings['network_name'] = settings['network_name'] or default['network_name']
+    settings['subnet'] = settings['subnet'] or default['subnet']
 
     if flask.request.method == 'POST':
         error = None
@@ -312,10 +313,6 @@ def network_settings():
             error = 'Subnet not specified'
         elif not decoded_subnet:
             error = 'Subnet is invalid'
-
-        print("Post: ", str(flask.request.form))
-        print("Error: ", error)
-        print("Subnet: ", str(decoded_subnet))
 
         if not error:
             consul_obj.kv.put('tarantool_settings/network_name', network_name)
@@ -343,7 +340,9 @@ def get_config(config_file):
     opts = ['CONSUL_HOST', 'DOCKER_CLIENT_CERT',
             'DOCKER_SERVER_CERT', 'DOCKER_CLIENT_KEY',
             'CONSUL_ACL_TOKEN', 'HTTP_BASIC_USERNAME',
-            'HTTP_BASIC_PASSWORD']
+            'HTTP_BASIC_PASSWORD', 'LISTEN_PORT',
+            'IPALLOC_RANGE', 'DOCKER_NETWORK',
+            'CREATE_NETWORK_AUTOMATICALLY', 'GATEWAY_IP']
 
     for opt in opts:
         if opt in os.environ:
@@ -387,6 +386,19 @@ def main():
             sys.exit("Please specify DOCKER_CLIENT_CERT")
         docker_server_cert = os.path.expanduser(cfg['DOCKER_SERVER_CERT'])
 
+    if 'IPALLOC_RANGE' in cfg:
+        global_env.default_network_settings['subnet'] = cfg['IPALLOC_RANGE']
+
+    if 'GATEWAY_IP' in cfg:
+        global_env.default_network_settings['gateway_ip'] = cfg['GATEWAY_IP']
+
+    if 'DOCKER_NETWORK' in cfg:
+        global_env.default_network_settings['network_name'] = cfg['DOCKER_NETWORK']
+
+    if 'CREATE_NETWORK_AUTOMATICALLY' in cfg:
+        global_env.default_network_settings['create_automatically'] = True
+
+
     docker_tls_config = None
     if docker_client_cert or docker_server_cert:
         docker_tls_config = docker.tls.TLSConfig(
@@ -397,12 +409,11 @@ def main():
 
     setup_routes()
 
-    sense.Sense.update()
-
     gevent.spawn(sense.Sense.timer_update)
     gevent.spawn(ip_pool.ip_cache_invalidation_loop)
 
     http_server = WSGIServer(('', listen_port), app)
+    logging.info("Listening on port %d", listen_port)
     http_server.serve_forever()
 
 

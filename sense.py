@@ -44,7 +44,7 @@ class Sense(object):
 
         containers = {}
         docker_info = {}
-        for entry in services['docker']:
+        for entry in services.get('docker', []):
             statuses = [check['Status'] for check in entry['Checks']]
 
             if all([s == 'passing' for s in statuses]):
@@ -263,6 +263,8 @@ class Sense(object):
         tarantool_kv = consul_kv_to_dict(global_env.settings)
         result = {'network_name': None, 'subnet': None}
 
+        default = global_env.default_network_settings
+
         for key, value in tarantool_kv.items():
             if key == 'tarantool_settings/network_name':
                 result['network_name'] = value
@@ -270,6 +272,10 @@ class Sense(object):
             if key == 'tarantool_settings/subnet':
                 result['subnet'] = value
 
+        result['network_name'] = result['network_name'] or default['network_name']
+        result['subnet'] = result['subnet'] or default['subnet']
+        result['gateway_ip'] = default['gateway_ip']
+        result['create_automatically'] = default['create_automatically']
         return result
 
     @classmethod
@@ -329,4 +335,4 @@ class Sense(object):
                 cls.update()
                 time.sleep(10)
             except Exception:
-                time.sleep(10)
+                time.sleep(1)

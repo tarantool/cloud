@@ -4,50 +4,43 @@ services:
   docker1:
     image: docker:dind
     privileged: true
-  docker2:
-    image: docker:dind
-    privileged: true
-  docker3:
-    image: docker:dind
-    privileged: true
 
-  # Consul cluster
-  # Since docker-compose changes IP addresses of containers every time they
-  # are started, we can't reliably restart consul with a persistent store.
-  # Instead, it would've been good to start consul with '-dev' which doesn't
-  # persist the state to disk, however there is a bug that it crashes when
-  # -bootstrap-expect and -dev are specified at the same time.
-  #
-  # As a workaround, the data is persisted on a tmpfs instead. The 'gosu root'
-  # is needed for consul to have proper rights on the tmpfs.
   consul1:
     image: consul
-    command: gosu root consul agent -data-dir=/tmp/consul -server -bootstrap-expect=3 -ui -client 0.0.0.0
+    links:
+      - docker1
     ports:
       - "8500:8500"
     tmpfs: /tmp/consul
     environment:
-      CONSUL_LOCAL_CONFIG: "{\"skip_leave_on_interrupt\": true}"
-  consul2:
-    image: consul
-    links:
-      - consul1
-    command: gosu root consul agent -data-dir=/tmp/consul -server -bootstrap-expect=3 -ui -retry-join=consul1 -client 0.0.0.0
-    tmpfs: /tmp/consul
-    environment:
-      CONSUL_LOCAL_CONFIG: "{\"skip_leave_on_interrupt\": true}"
-  consul3:
-    image: consul
-    links:
-      - consul1
-    command: gosu root consul agent -data-dir=/tmp/consul -server -bootstrap-expect=3 -ui -retry-join=consul1 -client 0.0.0.0
-    tmpfs: /tmp/consul
-    environment:
-      CONSUL_LOCAL_CONFIG: "{\"skip_leave_on_interrupt\": true}"
+      CONSUL_LOCAL_CONFIG: |
+        {
+          "services": [{
+            "name": "docker",
+            "address": "docker1",
+            "port": 2375,
+            "tags": ["lb_group=primary"],
+            "checks": [
+              {
+                "http": "http://docker1:2375/_ping",
+                "interval": "5s"
+              }
+            ]
+          }]
+        }
+      DOCKER_HOST: tcp://docker1:2375
+    command: agent -server -bootstrap-expect=1 -ui -client 0.0.0.0
 
   api:
     build: .
     links:
       - consul1
+    ports:
+      - "5061:5061"
     environment:
       CONSUL_HOST: "consul1"
+      LISTEN_PORT: 5061
+      IPALLOC_RANGE: 172.55.128.0/25
+      GATEWAY_IP: 172.55.128.1
+      DOCKER_NETWORK: mynet
+      CREATE_NETWORK_AUTOMATICALLY: "true"

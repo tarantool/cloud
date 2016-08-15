@@ -34,6 +34,9 @@ def allocate_ip(skip=[]):
     docker_nodes = [h for h in Sense.docker_hosts() if h['status'] == 'passing']
     network_settings = Sense.network_settings()
     subnet = network_settings['subnet']
+    gateway_ip = network_settings['gateway_ip']
+    if gateway_ip:
+        skip += [gateway_ip]
     if not subnet:
         raise RuntimeError("Subnet is not specified in settings")
 

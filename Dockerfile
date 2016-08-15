@@ -20,11 +20,14 @@ RUN set -x \
     && : "---------- remove build deps ----------" \
     && apk del .build-deps \
     && mkdir /im \
-    && mkdir /im/templates
+    && mkdir /im/templates \
+    && mkdir /im/docker
 
 COPY *.py /im/
-COPY templates/* /im/templates/
+COPY templates/ /im/templates/
+COPY docker/ /im/docker/
 
 VOLUME /im/config
+WORKDIR /im
 
-CMD ["python3", "/im/code/srv.py"]
+CMD ["python3", "/im/srv.py"]

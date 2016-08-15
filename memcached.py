@@ -13,6 +13,7 @@ import time
 import tarantool
 import allocate
 import datetime
+import json
 
 class Memcached(group.Group):
     def __init__(self, consul_host, group_id):
@@ -166,7 +167,16 @@ class Memcached(group.Group):
         allocation = self.allocation
 
         instance_id = self.group_id + '_' + instance_num
-        consul_host = allocation['instances'][instance_num]['host']
+        docker_host = allocation['instances'][instance_num]['host']
+        docker_hosts = Sense.docker_hosts()
+        consul_host = None
+        for host in docker_hosts:
+            if host['addr'].split(':')[0] == docker_host or \
+               host['consul_host'] == docker_host:
+                consul_host = host['consul_host']
+        if not consul_host:
+            raise RuntimeError("Failed to find consul host of %s" % docker_host)
+
         addr = blueprint['instances'][instance_num]['addr']
         check_period = blueprint['check_period']
 
@@ -208,19 +218,27 @@ class Memcached(group.Group):
 
     def unregister_instance(self, instance_num):
         services = self.services
+        allocation = self.allocation
 
         if instance_num not in services['instances']:
             return
 
         instance_id = self.group_id + '_' + instance_num
 
+        docker_host = allocation['instances'][instance_num]['host']
+        docker_hosts = Sense.docker_hosts()
+        consul_host = None
+        for host in docker_hosts:
+            if host['addr'].split(':')[0] == docker_host or \
+               host['consul_host'] == docker_host:
+                consul_host = host['consul_host']
+        if not consul_host:
+            raise RuntimeError("Failed to find consul host of %s" % docker_host)
+
         consul_hosts = [h['addr'].split(':')[0] for h in Sense.consul_hosts()
                         if h['status'] == 'passing']
 
-        print("Consul hosts: ", consul_hosts)
         if services:
-            consul_host = services['instances'][instance_num]['host']
-
             if consul_host in consul_hosts:
                 logging.info("Unregistering instance '%s' from '%s'",
                              instance_id,
@@ -264,6 +282,9 @@ class Memcached(group.Group):
 
         docker_obj = docker.Client(base_url=docker_addr,
                                    tls=global_env.docker_tls_config)
+
+        self.ensure_image(docker_addr)
+        self.ensure_network(docker_addr)
 
         if not replica_ip:
             logging.info("Creating memcached '%s' on '%s' with ip '%s'",
@@ -352,3 +373,57 @@ class Memcached(group.Group):
         else:
             logging.info("Not removing container '%s', as it doesn't exist",
                          instance_id)
+
+    def ensure_image(self, docker_addr):
+        docker_obj = docker.Client(base_url=docker_addr,
+                                   tls=global_env.docker_tls_config)
+        image_exists = any(['tarantool-cloud-memcached:latest' in i['RepoTags']
+                            for i in docker_obj.images()])
+
+        if image_exists:
+            return
+
+        response = docker_obj.build(path='docker/tarantool-cloud-memcached',
+                                    rm=True,
+                                    tag='tarantool-cloud-memcached',
+                                    dockerfile='Dockerfile')
+
+        for line in response:
+            decoded_line = json.loads(line.decode('utf-8'))
+            if 'stream' in decoded_line:
+                logging.info("Build memcached on %s: %s",
+                             docker_addr,
+                             decoded_line['stream'])
+
+    def ensure_network(self, docker_addr):
+        docker_obj = docker.Client(base_url=docker_addr,
+                                   tls=global_env.docker_tls_config)
+
+        settings = Sense.network_settings()
+        network_name = settings['network_name']
+        subnet = settings['subnet']
+
+        if not network_name:
+            raise RuntimeError("Network name not specified")
+
+        network_exists = any([n['Name'] == network_name
+                              for n in docker_obj.networks()])
+
+        if network_exists:
+            return
+
+        if not settings['create_automatically']:
+            raise RuntimeError(("No network '%s' exists and automatic creation" +
+                                "prohibited") % network_name)
+
+        ipam_pool = docker.utils.create_ipam_pool(
+            subnet=subnet
+        )
+        ipam_config = docker.utils.create_ipam_config(
+            pool_configs=[ipam_pool]
+        )
+
+        logging.info("Creating network '%s'", network_name)
+        docker_obj.create_network(name=network_name,
+                                  driver='bridge',
+                                  ipam=ipam_config)

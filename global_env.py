@@ -9,3 +9,7 @@ services = {}
 nodes = {}
 containers = {}
 docker_info = {}
+default_network_settings = {"network_name": None,
+                            "gateway_ip": None,
+                            "subnet": None,
+                            "create_automatically": False}
