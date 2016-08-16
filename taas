@@ -79,9 +79,18 @@ def http_delete(url, auth=None):
 
     return response.getcode(), response_text
 
-def ps_command(host, is_quiet=False):
+def ps_command(host, is_quiet, auth):
     url = 'http://%s/api/groups' % without_http_prefix(host)
-    _, data_str = http_get(url)
+
+    try:
+        _, data_str = http_get(url, auth)
+    except urllib2.HTTPError, err:
+        if err.code == 401:
+            print("Authorization required")
+            sys.exit(1)
+        else:
+            raise
+
     data = json.loads(data_str)
 
     result = []
@@ -117,16 +126,19 @@ def ps_command(host, is_quiet=False):
         print('\n'.join(groups))
 
 
-def inspect_command(host, group_id_list):
+def inspect_command(host, group_id_list, auth):
     result = []
     for group_id in group_id_list:
         url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
         data_str = None
         try:
-            _, data_str = http_get(url)
+            _, data_str = http_get(url, auth)
         except urllib2.HTTPError, err:
             if err.code == 404:
                 print("No such group: '%s'" % group_id)
+                sys.exit(1)
+            elif err.code == 401:
+                print("Authorization required")
                 sys.exit(1)
             else:
                 raise
@@ -142,31 +154,42 @@ def inspect_command(host, group_id_list):
     print(json.dumps(result, indent=2))
 
 
-def run_command(host, name, memsize):
+def run_command(host, name, memsize, auth):
     data = {'name': name,
             'memsize': memsize}
 
     url = 'http://%s/api/groups' % without_http_prefix(host)
 
-    _, data_str = http_post(url, data)
+    try:
+        _, data_str = http_post(url, data, auth)
+    except urllib2.HTTPError, err:
+        if err.code == 401:
+            print("Authorization required")
+            sys.exit(1)
+        else:
+            raise
+
     data = json.loads(data_str)
 
     print(data['id'])
 
-def rm_command(host, group_id_list):
+def rm_command(host, group_id_list, auth):
     for group_id in group_id_list:
         url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
         try:
-            http_delete(url)
+            http_delete(url, auth)
         except urllib2.HTTPError, err:
             if err.code == 404:
                 print("No such group: '%s'" % group_id)
+                sys.exit(1)
+            elif err.code == 401:
+                print("Authorization required")
                 sys.exit(1)
             else:
                 raise
 
 
-def update_command(host, group_id, memsize):
+def update_command(host, group_id, memsize, auth):
     pass
 
 def main():
@@ -183,6 +206,12 @@ def main():
                         action='store_true',
                         default=False,
                         help='enable verbose output')
+
+    parser.add_argument('-u', '--username',
+                        help='User name for HTTP Basic Auth')
+
+    parser.add_argument('-p', '--password',
+                        help='Password for HTTP Basic Auth')
 
     subparsers = parser.add_subparsers(title="commands", dest="subparser_name")
 
@@ -230,6 +259,9 @@ def main():
 
     args = parser.parse_args()
 
+    auth = None
+    if args.username and args.password:
+        auth = (args.username, args.password)
 
     host = None
     if args.host is None:
@@ -241,15 +273,15 @@ def main():
         host = args.host
 
     if args.subparser_name == 'ps':
-        ps_command(host, args.quiet)
+        ps_command(host, args.quiet, auth)
     if args.subparser_name == 'inspect':
-        inspect_command(host, args.group_id)
+        inspect_command(host, args.group_id, auth)
     elif args.subparser_name == 'run':
-        run_command(host, args.name, args.memsize)
+        run_command(host, args.name, args.memsize, auth)
     elif args.subparser_name == 'rm':
-        rm_command(host, args.group_id)
+        rm_command(host, args.group_id, auth)
     elif args.subparser_name == 'update':
-        update_command(host, args.group_id, args.memsize)
+        update_command(host, args.group_id, args.memsize, auth)
 
 if __name__ == '__main__':
     main()
