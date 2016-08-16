@@ -35,6 +35,7 @@ services:
     build: .
     links:
       - consul1
+      - docker1
     ports:
       - "5061:5061"
     environment:

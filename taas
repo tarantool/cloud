@@ -1,0 +1,255 @@
+#!/usr/bin/env python
+
+import argparse
+import json
+import logging
+import sys
+import os
+import urllib2
+import base64
+import collections
+
+GROUP_KEY_ORDER = ["id", "creation_time", "name", "type", "memsize"]
+
+def print_table(header, data):
+    lengths = [0] * len(header)
+
+    for idx, field in enumerate(header):
+        maxlen = max([len(d[field[0]])+1 for d in data] + [len(field[1]) + 4])
+        lengths[idx] = maxlen
+
+    fmt = " ".join('{!s:<%d}'%l for l in lengths)
+
+    print(fmt.format(*[c[1] for c in header]))
+    for entry in data:
+        print(fmt.format(*[entry[c[0]] for c in header]))
+
+def without_http_prefix(url):
+    """
+    Returns a URL without the http:// or https:// prefixes
+    """
+    if url.startswith('http://'):
+        return url[7:]
+    elif url.startswith('https://'):
+        return url[8:]
+    return url
+
+def http_get(url, auth=None):
+    request = urllib2.Request(url)
+    if auth:
+        base64string = base64.encodestring(
+            '%s:%s' % (auth[0], auth[1])).replace('\n', '')
+        request.add_header('Authorization', 'Basic %s' % base64string)
+
+    response = urllib2.urlopen(request)
+    response_text = response.read()
+
+    return response.getcode(), response_text
+
+def http_post(url, data, auth=None):
+    data_str = json.dumps(data)
+    data_len = len(data_str)
+
+    request = urllib2.Request(
+        url,
+        data_str,
+        {'Content-Type': 'application/json',
+         'Content-Length': data_len})
+
+    if auth:
+        base64string = base64.encodestring(
+            '%s:%s' % (auth[0], auth[1])).replace('\n', '')
+        request.add_header('Authorization', 'Basic %s' % base64string)
+
+    response = urllib2.urlopen(request)
+    response_text = response.read()
+
+    return response.getcode(), response_text
+
+def http_delete(url, auth=None):
+    request = urllib2.Request(url)
+    request.get_method = lambda: 'DELETE'
+    if auth:
+        base64string = base64.encodestring(
+            '%s:%s' % (auth[0], auth[1])).replace('\n', '')
+        request.add_header('Authorization', 'Basic %s' % base64string)
+
+    response = urllib2.urlopen(request)
+    response_text = response.read()
+
+    return response.getcode(), response_text
+
+def ps_command(host, is_quiet=False):
+    url = 'http://%s/api/groups' % without_http_prefix(host)
+    _, data_str = http_get(url)
+    data = json.loads(data_str)
+
+    result = []
+    for group_id, group in data.items():
+        for instance in group['instances']:
+
+            result.append({
+                'group_id': group_id,
+                'instance_num': instance['name'],
+                'name': group['name'],
+                'type': group['type'],
+                'memsize': str(group['memsize']),
+                'state': group['state']['name'],
+                'addr': instance['addr'],
+                'host': instance['host']
+            })
+
+    header = [
+        ('group_id', 'GROUP'),
+        ('instance_num', 'INSTANCE #'),
+        ('name', 'NAME'),
+        ('type', 'TYPE'),
+        ('memsize', 'SIZE'),
+        ('state', 'STATE'),
+        ('addr', 'ADDRESS'),
+        ('host', 'NODE')
+    ]
+
+    if not is_quiet:
+        print_table(header, result)
+    else:
+        groups = set([i['group_id'] for i in result])
+        print('\n'.join(groups))
+
+
+def inspect_command(host, group_id_list):
+    result = []
+    for group_id in group_id_list:
+        url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
+        data_str = None
+        try:
+            _, data_str = http_get(url)
+        except urllib2.HTTPError, err:
+            if err.code == 404:
+                print("No such group: '%s'" % group_id)
+                sys.exit(1)
+            else:
+                raise
+        data = json.loads(data_str)
+
+        # More important fields should be displayed on top
+        ordered_data = collections.OrderedDict()
+        keys = [k for k in GROUP_KEY_ORDER if k in data.keys()]
+        keys = keys + [k for k in data.keys() if k not in keys]
+        for key in keys:
+            ordered_data[key] = data[key]
+        result.append(ordered_data)
+    print(json.dumps(result, indent=2))
+
+
+def run_command(host, name, memsize):
+    data = {'name': name,
+            'memsize': memsize}
+
+    url = 'http://%s/api/groups' % without_http_prefix(host)
+
+    _, data_str = http_post(url, data)
+    data = json.loads(data_str)
+
+    print(data['id'])
+
+def rm_command(host, group_id_list):
+    for group_id in group_id_list:
+        url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
+        try:
+            http_delete(url)
+        except urllib2.HTTPError, err:
+            if err.code == 404:
+                print("No such group: '%s'" % group_id)
+                sys.exit(1)
+            else:
+                raise
+
+
+def update_command(host, group_id, memsize):
+    pass
+
+def main():
+    # Don't spam with HTTP connection logs from 'requests' module
+    logging.getLogger("requests").setLevel(logging.WARNING)
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('-H', '--host',
+                        default = None,
+                        help='specify taas host to connect to')
+
+    parser.add_argument('-v', '--verbose',
+                        action='store_true',
+                        default=False,
+                        help='enable verbose output')
+
+    subparsers = parser.add_subparsers(title="commands", dest="subparser_name")
+
+    ps_parser = subparsers.add_parser(
+        'ps', help='show a list of running groups')
+    ps_parser.add_argument(
+        '-q', '--quiet',
+        action='store_true',
+        help='only show group IDs')
+
+    inspect_parser = subparsers.add_parser(
+        'inspect', help='inspect a group')
+    inspect_parser.add_argument(
+        'group_id',
+        nargs='+',
+        help='group to inspect')
+
+    run_parser = subparsers.add_parser(
+        'run', help='run a new group')
+    run_parser.add_argument(
+        '--name',
+        help='name of the new group')
+    run_parser.add_argument(
+        'memsize',
+        type=float,
+        help='amount of memory to allocate, in GiB (default is 0.5)',
+        nargs='?',
+        default=0.5)
+
+    rm_parser = subparsers.add_parser(
+        'rm', help='remove one or more groups')
+    rm_parser.add_argument(
+        'group_id',
+        nargs='+',
+        help='group to remove')
+
+    update_parser = subparsers.add_parser(
+        'update', help='update an existing group')
+    update_parser.add_argument('--memsize',
+                               type=float,
+                               help='amount of memory to set',
+                               default=None)
+    update_parser.add_argument('group_id',
+                               help='group ID to update')
+
+    args = parser.parse_args()
+
+
+    host = None
+    if args.host is None:
+        if 'TARANTOOL_CLOUD_HOST' in os.environ:
+            host = os.environ['TARANTOOL_CLOUD_HOST']
+        else:
+            sys.exit("Please specify --host or pass TARANTOOL_CLOUD_HOST via env")
+    else:
+        host = args.host
+
+    if args.subparser_name == 'ps':
+        ps_command(host, args.quiet)
+    if args.subparser_name == 'inspect':
+        inspect_command(host, args.group_id)
+    elif args.subparser_name == 'run':
+        run_command(host, args.name, args.memsize)
+    elif args.subparser_name == 'rm':
+        rm_command(host, args.group_id)
+    elif args.subparser_name == 'update':
+        update_command(host, args.group_id, args.memsize)
+
+if __name__ == '__main__':
+    main()

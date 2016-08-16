@@ -22,7 +22,67 @@ Then go to [http://localhost:5061](http://localhost:5061) to access web UI.
 
 *Note*: first-time creation and launch of tarantool instances may take a long time, as the instance manager is building docker images.
 
-## Creating Tarantool via REST API
+## Managing Tarantool instances via command-line client
+
+### Create new instance:
+
+```sh
+./taas -H localhost:5061 run --name myinstance 0.3
+```
+
+This will create an instance named `myinstance`, with 0.3 GB memory limit and return its ID.
+
+### List instances:
+
+```sh
+./taas -H localhost:5061 ps
+```
+
+It will produce output like this:
+
+```sh
+GROUP                             INSTANCE #     NAME        TYPE       SIZE     STATE     ADDRESS       NODE
+37c82b4a32344b0cae1143b5d017b204  2              myinstance  memcached  0.3      Down      172.55.128.3  docker1
+37c82b4a32344b0cae1143b5d017b204  1              myinstance  memcached  0.3      Down      172.55.128.2  docker1
+```
+
+### Inspect an instance
+
+This is a command that shows low-level details about an instance. Make sure to put your own instance ID instead of `37c82b4a32344b0cae1143b5d017b204`
+
+```sh
+./taas -H localhost:5061 inspect 37c82b4a32344b0cae1143b5d017b204
+```
+
+Will show output like this:
+
+``` bash
+[
+  {
+    "id": "37c82b4a32344b0cae1143b5d017b204",
+    "creation_time": "2016-08-16T13:30:24.827509+00:00",
+    "name": "myinstance",
+    "type": "memcached",
+    "memsize": 0.3,
+    "instances": [
+      ...
+    ],
+    ...
+  }
+]
+```
+
+### Remove an instance
+
+Make sure to put your own instance ID instead of `37c82b4a32344b0cae1143b5d017b204`
+
+```sh
+./taas -H localhost:5061 rm 37c82b4a32344b0cae1143b5d017b204
+```
+
+On success, returns nothing.
+
+## Creating Tarantool instances via REST API
 
 ```sh
 curl -X POST -F 'name=myinstance' -F 'memsize=0.2' localhost:5061/api/groups
