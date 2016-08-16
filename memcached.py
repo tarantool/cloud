@@ -69,6 +69,25 @@ class Memcached(group.Group):
         self.remove_blueprint()
         Sense.update()
 
+    def rename(self, name):
+        consul_obj = consul.Consul(host=global_env.consul_host,
+                                   token=global_env.consul_acl_token)
+        kv = consul_obj.kv
+
+        logging.info("Renaming group '%s' to '%s'",
+                     self.group_id, name)
+        kv.put('tarantool/%s/blueprint/name' % self.group_id, name)
+
+
+    def resize(self, memsize):
+        consul_obj = consul.Consul(host=global_env.consul_host,
+                                   token=global_env.consul_acl_token)
+        kv = consul_obj.kv
+
+        self.resize_instance("1", memsize)
+        self.resize_instance("2", memsize)
+        kv.put('tarantool/%s/blueprint/memsize' % self.group_id, str(memsize))
+
     def allocate(self):
         consul_obj = consul.Consul(host=global_env.consul_host,
                                    token=global_env.consul_acl_token)
@@ -240,13 +259,18 @@ class Memcached(group.Group):
 
         if services:
             if consul_host in consul_hosts:
+                consul_obj = consul.Consul(host=consul_host,
+                                           token=global_env.consul_acl_token)
+
+                check_id = instance_id + '_memory'
+                logging.info("Unregistering check '%s'", check_id)
+                consul_obj.agent.check.deregister(check_id)
+
                 logging.info("Unregistering instance '%s' from '%s'",
                              instance_id,
                              consul_host)
-
-                consul_obj = consul.Consul(host=consul_host,
-                                           token=global_env.consul_acl_token)
                 consul_obj.agent.service.deregister(instance_id)
+
         else:
             logging.info("Not unregistering '%s', as it's not registered",
                          instance_id)
@@ -373,6 +397,54 @@ class Memcached(group.Group):
         else:
             logging.info("Not removing container '%s', as it doesn't exist",
                          instance_id)
+
+    def resize_instance(self, instance_num, memsize):
+        containers = self.containers
+
+        if instance_num not in containers['instances']:
+            return
+
+        instance_id = self.group_id + '_' + instance_num
+        docker_hosts = [h['addr'].split(':')[0] for h in Sense.docker_hosts()
+                        if h['status'] == 'passing']
+
+        if containers:
+            docker_host = containers['instances'][instance_num]['host']
+            docker_hosts = Sense.docker_hosts()
+
+            docker_addr = None
+            for host in docker_hosts:
+                if host['addr'].split(':')[0] == docker_host or \
+                   host['consul_host'] == docker_host:
+                    docker_addr = host['addr']
+            if not docker_addr:
+                raise RuntimeError("No such Docker host: '%s'" % docker_host)
+
+            logging.info("Resizing container '%s' to %f GiB on '%s'",
+                         instance_id,
+                         memsize,
+                         docker_host)
+
+            docker_obj = docker.Client(base_url=docker_addr,
+                                       tls=global_env.docker_tls_config)
+
+            cmd = "tarantool_set_config.lua TARANTOOL_SLAB_ALLOC_ARENA " + \
+                  str(memsize)
+
+            exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
+                                             cmd)
+            docker_obj.exec_start(exec_id)
+            ret = docker_obj.exec_inspect(exec_id)
+
+            if ret['ExitCode'] != 0:
+                raise RuntimeError("Failed to set memory size for container " +
+                                   instance_id)
+
+            docker_obj.restart(container=instance_id)
+        else:
+            logging.info("Not resizing container '%s', as it doesn't exist",
+                         instance_id)
+
 
     def ensure_image(self, docker_addr):
         docker_obj = docker.Client(base_url=docker_addr,

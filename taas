@@ -66,6 +66,27 @@ def http_post(url, data, auth=None):
 
     return response.getcode(), response_text
 
+def http_put(url, data, auth=None):
+    data_str = json.dumps(data)
+    data_len = len(data_str)
+
+    request = urllib2.Request(
+        url,
+        data_str,
+        {'Content-Type': 'application/json',
+         'Content-Length': data_len})
+    request.get_method = lambda: 'PUT'
+
+    if auth:
+        base64string = base64.encodestring(
+            '%s:%s' % (auth[0], auth[1])).replace('\n', '')
+        request.add_header('Authorization', 'Basic %s' % base64string)
+
+    response = urllib2.urlopen(request)
+    response_text = response.read()
+
+    return response.getcode(), response_text
+
 def http_delete(url, auth=None):
     request = urllib2.Request(url)
     request.get_method = lambda: 'DELETE'
@@ -189,8 +210,28 @@ def rm_command(host, group_id_list, auth):
                 raise
 
 
-def update_command(host, group_id, memsize, auth):
-    pass
+def update_command(host, group_id, name, memsize, auth):
+    data = {}
+    if name:
+        data['name'] = name
+    if memsize:
+        data['memsize'] = memsize
+
+    url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
+
+    try:
+        _, data_str = http_put(url, data, auth)
+    except urllib2.HTTPError, err:
+        if err.code == 401:
+            print("Authorization required")
+            sys.exit(1)
+        else:
+            raise
+
+    data = json.loads(data_str)
+
+    print(data['id'])
+
 
 def main():
     # Don't spam with HTTP connection logs from 'requests' module
@@ -254,6 +295,9 @@ def main():
                                type=float,
                                help='amount of memory to set',
                                default=None)
+    update_parser.add_argument('--name',
+                               help='name to set',
+                               default=None)
     update_parser.add_argument('group_id',
                                help='group ID to update')
 
@@ -281,7 +325,7 @@ def main():
     elif args.subparser_name == 'rm':
         rm_command(host, args.group_id, auth)
     elif args.subparser_name == 'update':
-        update_command(host, args.group_id, args.memsize, auth)
+        update_command(host, args.group_id, args.name, args.memsize, auth)
 
 if __name__ == '__main__':
     main()

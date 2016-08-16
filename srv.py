@@ -132,21 +132,23 @@ class Group(Resource):
         return '', 204
 
     def put(self, group_id):
+        abort_if_group_doesnt_exist(group_id)
+        memc = memcached.Memcached.get(group_id)
+
         parser = reqparse.RequestParser()
         parser = reqparse.RequestParser()
         parser.add_argument('name')
         parser.add_argument('memsize', type=float, default=0.5)
 
         args = parser.parse_args()
-        group = GROUPS[group_id]
 
-        if args['name']:
-            group['name'] = args['name']
-        if args['memsize']:
-            group['memsize'] = args['memsize']
+        if args['memsize'] and memc.blueprint['memsize'] != args['memsize']:
+            memc.resize(args['memsize'])
 
-        GROUPS[group_id] = group
-        return group, 201
+        if args['name'] and memc.blueprint['name'] != args['name']:
+            memc.rename(args['name'])
+
+        return group_to_dict(group_id), 201
 
 
 class GroupList(Resource):
@@ -273,6 +275,21 @@ def create_group():
 
 
     return flask.redirect("/groups")
+
+@app.route('/groups/<group_id>/resize', methods=['POST'])
+def resize_group(group_id):
+    memsize = None
+    try:
+        memsize=float(flask.request.form['memsize'])
+    except ValueError:
+        return flask.redirect("/groups")
+
+
+    memc = memcached.Memcached.get(group_id)
+    memc.resize(memsize)
+
+    return flask.redirect("/groups")
+
 
 @app.route('/groups/<group_id>/delete', methods=['POST'])
 def delete_group(group_id):

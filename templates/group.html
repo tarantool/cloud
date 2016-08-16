@@ -77,13 +77,13 @@
     Resize
   </div>
   <div class="panel-body">
-    <form>
+    <form action="{{ url_for('resize_group', group_id=group['id'])}}" method="post">
       <div class="form-group">
         Be careful when resizing instances below their previous size, as the data may not fit into the new size.
       </div>
       <div class="form-group">
         <label for="newsize">New size</label>
-        <input type="text" class="form-control" id="newsize" placeholder="0.5">
+        <input type="text" class="form-control" id="memsize" name="memsize" placeholder="0.5">
       </div>
       <button type="submit" class="btn btn-default">Resize</button>
     </form>
