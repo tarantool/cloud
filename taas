@@ -222,15 +222,16 @@ def update_command(host, group_id, name, memsize, auth):
     try:
         _, data_str = http_put(url, data, auth)
     except urllib2.HTTPError, err:
-        if err.code == 401:
+        if err.code == 404:
+            print("No such group: '%s'" % group_id)
+            sys.exit(1)
+        elif err.code == 401:
             print("Authorization required")
             sys.exit(1)
         else:
             raise
 
     data = json.loads(data_str)
-
-    print(data['id'])
 
 
 def main():

@@ -30,7 +30,7 @@ Then go to [http://localhost:5061](http://localhost:5061) to access web UI.
 ./taas -H localhost:5061 run --name myinstance 0.3
 ```
 
-This will create an instance named `myinstance`, with 0.3 GB memory limit and return its ID.
+This will create an instance named `myinstance`, with 0.3 GiB memory limit and return its ID.
 
 ### List instances:
 
@@ -82,10 +82,20 @@ Make sure to put your own instance ID instead of `37c82b4a32344b0cae1143b5d017b2
 
 On success, returns nothing.
 
+### Rename/Resize an instance
+
+Make sure to put your own instance ID instead of `37c82b4a32344b0cae1143b5d017b204`
+
+``` bash
+./taas -H localhost:5061 update --memsize 1.2 --name newname 37c82b4a32344b0cae1143b5d017b204
+```
+
+This will set memory limit to 1.2 GiB and rename instance to 'newname'.
+
 ## Creating Tarantool instances via REST API
 
 ```sh
 curl -X POST -F 'name=myinstance' -F 'memsize=0.2' localhost:5061/api/groups
 ```
 
-This will create an instance named `myinstance`, with 0.2 GB memory limit.
+This will create an instance named `myinstance`, with 0.2 GiB memory limit.
