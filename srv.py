@@ -31,6 +31,8 @@ api = Api(app)
 Bootstrap(app)
 BasicAuth(app)
 
+TASKS = {}
+
 def abort_if_group_doesnt_exist(group_id):
     if group_id not in sense.Sense.blueprints():
         abort(404, message="group {} doesn't exist".format(group_id))
@@ -125,11 +127,26 @@ class Group(Resource):
         return group_to_dict(group_id)
 
     def delete(self, group_id):
+        parser = reqparse.RequestParser()
+        parser.add_argument('async', type=bool, default=False)
+        args = parser.parse_args()
+
+        print("Is async: ", args['async'])
         abort_if_group_doesnt_exist(group_id)
 
+        delete_task = memcached.DeleteTask(group_id)
+        TASKS[delete_task.task_id] = delete_task
+
         memc = memcached.Memcached.get(group_id)
-        memc.delete()
-        return '', 204
+        gevent.spawn(memc.delete, delete_task)
+
+        if args['async']:
+            result = {'id': group_id,
+                      'task_id': delete_task.task_id}
+            return result, 202
+        else:
+            delete_task.wait_for_completion()
+            return '', 204
 
     def put(self, group_id):
         abort_if_group_doesnt_exist(group_id)
@@ -164,12 +181,55 @@ class GroupList(Resource):
         parser = reqparse.RequestParser()
         parser.add_argument('name', required=True)
         parser.add_argument('memsize', type=float, default=0.5)
+        parser.add_argument('async', type=bool, default=False)
 
+        logging.info("Creating instance")
 
         args = parser.parse_args()
-        memc = memcached.Memcached.create(args['name'], args['memsize'], 10)
+        group_id = uuid.uuid4().hex
+        create_task = memcached.CreateTask(group_id)
+        TASKS[create_task.task_id] = create_task
 
-        return group_to_dict(memc.group_id), 201
+        gevent.spawn(memcached.Memcached.create,
+                     create_task,
+                     args['name'],
+                     args['memsize'],
+                     10)
+
+        if args['async']:
+            result = {'id': create_task.group_id,
+                      'task_id': create_task.task_id}
+            return result, 202
+
+        else:
+            create_task.wait_for_completion()
+            return group_to_dict(create_task.group_id), 201
+
+class Task(Resource):
+    def get(self, task_id):
+        parser = reqparse.RequestParser()
+        parser.add_argument('index', type=int)
+
+        args = parser.parse_args()
+
+        if task_id not in TASKS:
+            abort(404, message="task {} doesn't exist".format(task_id))
+
+        if args['index']:
+            TASKS[task_id].wait(args['index'])
+
+        return TASKS[task_id].get_dict(args['index'])
+
+
+class TaskList(Resource):
+    def get(self):
+        result = {}
+
+        for task_id, task in TASKS.items():
+            result[task_id] = task.get_dict().copy()
+            del result[task_id]['logs']
+
+        return result
 
 
 class StateList(Resource):
@@ -207,6 +267,10 @@ def setup_routes():
     api.add_resource(Instance, '/api/instances/<instance_id>')
 
     api.add_resource(StateList, '/api/states')
+
+    api.add_resource(TaskList, '/api/tasks')
+    api.add_resource(Task, '/api/tasks/<task_id>')
+
 
 @app.route('/servers')
 def list_servers():
@@ -271,8 +335,11 @@ def create_group():
     except ValueError:
         memsize = 0.5
 
-    memcached.Memcached.create(name, memsize, 10)
+    group_id = uuid.uuid4().hex
+    create_task = memcached.CreateTask(group_id)
+    TASKS[create_task.task_id] = create_task
 
+    memcached.Memcached.create(create_task, name, memsize, 10)
 
     return flask.redirect("/groups")
 
@@ -284,7 +351,6 @@ def resize_group(group_id):
     except ValueError:
         return flask.redirect("/groups")
 
-
     memc = memcached.Memcached.get(group_id)
     memc.resize(memsize)
 
@@ -294,7 +360,9 @@ def resize_group(group_id):
 @app.route('/groups/<group_id>/delete', methods=['POST'])
 def delete_group(group_id):
     memc = memcached.Memcached.get(group_id)
-    memc.delete()
+
+    delete_task = memcached.DeleteTask(group_id)
+    memc.delete(delete_task)
 
     return flask.redirect("/groups")
 

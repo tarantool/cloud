@@ -1,13 +1,17 @@
 #!/usr/bin/env python
+from __future__ import print_function
 
 import argparse
 import json
 import logging
 import sys
 import os
+import urllib
 import urllib2
 import base64
 import collections
+
+
 
 GROUP_KEY_ORDER = ["id", "creation_time", "name", "type", "memsize"]
 
@@ -34,7 +38,10 @@ def without_http_prefix(url):
         return url[8:]
     return url
 
-def http_get(url, auth=None):
+def http_get(url, args=None, auth=None):
+    if args:
+        url = url + '?' + urllib.urlencode(args, True)
+
     request = urllib2.Request(url)
     if auth:
         base64string = base64.encodestring(
@@ -87,9 +94,17 @@ def http_put(url, data, auth=None):
 
     return response.getcode(), response_text
 
-def http_delete(url, auth=None):
-    request = urllib2.Request(url)
+def http_delete(url, data, auth=None):
+    data_str = json.dumps(data)
+    data_len = len(data_str)
+
+    request = urllib2.Request(
+        url,
+        data_str,
+        {'Content-Type': 'application/json',
+         'Content-Length': data_len})
     request.get_method = lambda: 'DELETE'
+
     if auth:
         base64string = base64.encodestring(
             '%s:%s' % (auth[0], auth[1])).replace('\n', '')
@@ -104,7 +119,7 @@ def ps_command(host, is_quiet, auth):
     url = 'http://%s/api/groups' % without_http_prefix(host)
 
     try:
-        _, data_str = http_get(url, auth)
+        _, data_str = http_get(url, None, auth)
     except urllib2.HTTPError, err:
         if err.code == 401:
             print("Authorization required")
@@ -153,7 +168,7 @@ def inspect_command(host, group_id_list, auth):
         url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
         data_str = None
         try:
-            _, data_str = http_get(url, auth)
+            _, data_str = http_get(url, None, auth)
         except urllib2.HTTPError, err:
             if err.code == 404:
                 print("No such group: '%s'" % group_id)
@@ -175,14 +190,15 @@ def inspect_command(host, group_id_list, auth):
     print(json.dumps(result, indent=2))
 
 
-def run_command(host, name, memsize, auth):
-    data = {'name': name,
-            'memsize': memsize}
+def run_command(host, name, memsize, auth, verbose):
+    args = {'name': name,
+            'memsize': memsize,
+            'async': True}
 
     url = 'http://%s/api/groups' % without_http_prefix(host)
 
     try:
-        _, data_str = http_post(url, data, auth)
+        _, data_str = http_post(url, args, auth)
     except urllib2.HTTPError, err:
         if err.code == 401:
             print("Authorization required")
@@ -192,13 +208,46 @@ def run_command(host, name, memsize, auth):
 
     data = json.loads(data_str)
 
-    print(data['id'])
+    task_id = data['task_id']
+    group_id = data['id']
 
-def rm_command(host, group_id_list, auth):
+    status = "running"
+    index = 0
+    while status == "running":
+        url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+        args = {"index": index}
+        try:
+            _, data_str = http_get(url, args, auth)
+        except urllib2.HTTPError, err:
+            if err.code == 401:
+                print("Authorization required")
+                sys.exit(1)
+            else:
+                raise
+        data = json.loads(data_str)
+        index = data['index']
+        status = data['status']
+        for log in data['logs']:
+            if verbose:
+                print(log['message'])
+            else:
+                print('.', end='')
+                sys.stdout.flush()
+
+        if status == "error":
+            print("Error: %s" % data['message'])
+            sys.exit(1)
+
+    if not verbose:
+        print('')
+
+    print(group_id)
+
+def rm_command(host, group_id_list, auth, verbose):
     for group_id in group_id_list:
         url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
         try:
-            http_delete(url, auth)
+            _, data_str = http_delete(url, {'async': True}, auth)
         except urllib2.HTTPError, err:
             if err.code == 404:
                 print("No such group: '%s'" % group_id)
@@ -208,6 +257,39 @@ def rm_command(host, group_id_list, auth):
                 sys.exit(1)
             else:
                 raise
+
+        data = json.loads(data_str)
+        task_id = data['task_id']
+
+        status = "running"
+        index = 0
+        while status == "running":
+            url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+            args = {"index": index}
+            try:
+                _, data_str = http_get(url, args, auth)
+            except urllib2.HTTPError, err:
+                if err.code == 401:
+                    print("Authorization required")
+                    sys.exit(1)
+                else:
+                    raise
+            data = json.loads(data_str)
+            index = data['index']
+            status = data['status']
+            for log in data['logs']:
+                if verbose:
+                    print(log['message'])
+                else:
+                    print('.', end='')
+                    sys.stdout.flush()
+
+            if status == "error":
+                print("Error: %s" % data['message'])
+                sys.exit(1)
+
+    if not verbose:
+        print('')
 
 
 def update_command(host, group_id, name, memsize, auth):
@@ -322,9 +404,9 @@ def main():
     if args.subparser_name == 'inspect':
         inspect_command(host, args.group_id, auth)
     elif args.subparser_name == 'run':
-        run_command(host, args.name, args.memsize, auth)
+        run_command(host, args.name, args.memsize, auth, args.verbose)
     elif args.subparser_name == 'rm':
-        rm_command(host, args.group_id, auth)
+        rm_command(host, args.group_id, auth, args.verbose)
     elif args.subparser_name == 'update':
         update_command(host, args.group_id, args.name, args.memsize, auth)
 

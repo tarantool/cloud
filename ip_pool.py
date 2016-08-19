@@ -21,7 +21,7 @@ def invalidate_cache():
 
     now = datetime.datetime.now()
     with CACHE_LOCK:
-        for addr, created_time in IP_CACHE.items():
+        for addr, created_time in list(IP_CACHE.items()):
             if (now - created_time).seconds > CACHE_EXPIRATION_TIME:
                 logging.info("Expiring cached address: %s", addr)
                 del IP_CACHE[addr]

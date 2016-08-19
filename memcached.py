@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+# pylint: disable=missing-super-argument
 import global_env
 import group
 import consul
@@ -14,6 +14,27 @@ import tarantool
 import allocate
 import datetime
 import json
+import task
+
+class MemcachedTask(task.Task):
+    memcached_task_type = None
+    def __init__(self, group_id):
+        super().__init__(self.memcached_task_type)
+        self.group_id = group_id
+
+    def get_dict(self, index=None):
+        obj = super().get_dict(index)
+        obj['group_id'] = self.group_id
+        return obj
+
+class CreateTask(MemcachedTask):
+    memcached_task_type = "create_memcached"
+
+class UpdateTask(MemcachedTask):
+    memcached_task_type = "update_memcached"
+
+class DeleteTask(MemcachedTask):
+    memcached_task_type = "delete_memcached"
 
 class Memcached(group.Group):
     def __init__(self, consul_host, group_id):
@@ -26,12 +47,14 @@ class Memcached(group.Group):
         return memc
 
     @classmethod
-    def create(cls, name, memsize, check_period):
-        group_id = uuid.uuid4().hex
+    def create(cls, create_task, name, memsize, check_period):
+        group_id = create_task.group_id
 
         consul_obj = consul.Consul(host=global_env.consul_host,
                                    token=global_env.consul_acl_token)
         kv = consul_obj.kv
+
+        create_task.log("Creating group '%s'", group_id)
 
         ip1 = ip_pool.allocate_ip()
         ip2 = ip_pool.allocate_ip()
@@ -52,22 +75,44 @@ class Memcached(group.Group):
         memc.allocate()
         Sense.update()
 
+        create_task.log("Allocated instance to physical nodes", progress=0.1)
+
         memc.register()
         Sense.update()
+
+        create_task.log("Registered services", progress=0.2)
 
         memc.create_containers()
         Sense.update()
 
+        create_task.log("Created containers", progress=0.9)
+
         memc.enable_replication()
+
+        create_task.log("Enabled replication", progress=1)
+        create_task.set_status(task.STATUS_SUCCESS)
 
         return memc
 
-    def delete(self):
+    def delete(self, delete_task):
+        group_id = self.group_id
+        delete_task.log("Deleting group '%s'", group_id)
+
         self.unallocate()
+        delete_task.log("Unallocated instance")
+
         self.unregister()
+        delete_task.log("Unregistered services")
+
         self.remove_containers()
+        delete_task.log("Removed containers")
+
         self.remove_blueprint()
+        delete_task.log("Completed removing group")
+
         Sense.update()
+        delete_task.set_status(task.STATUS_SUCCESS)
+
 
     def rename(self, name):
         consul_obj = consul.Consul(host=global_env.consul_host,
@@ -173,7 +218,11 @@ class Memcached(group.Group):
 
             exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
                                              cmd)
-            docker_obj.exec_start(exec_id)
+            stream = docker_obj.exec_start(exec_id, stream=True)
+
+            for line in stream:
+                logging.info("Exec: %s", str(line))
+
             ret = docker_obj.exec_inspect(exec_id)
 
             if ret['ExitCode'] != 0:
