@@ -292,8 +292,8 @@ def rm_command(host, group_id_list, auth, verbose):
         print('')
 
 
-def update_command(host, group_id, name, memsize, auth):
-    data = {}
+def update_command(host, group_id, name, memsize, auth, verbose):
+    data = {'async': True}
     if name:
         data['name'] = name
     if memsize:
@@ -314,6 +314,38 @@ def update_command(host, group_id, name, memsize, auth):
             raise
 
     data = json.loads(data_str)
+    task_id = data['task_id']
+
+    status = "running"
+    index = 0
+    while status == "running":
+        url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+        args = {"index": index}
+        try:
+            _, data_str = http_get(url, args, auth)
+        except urllib2.HTTPError, err:
+            if err.code == 401:
+                print("Authorization required")
+                sys.exit(1)
+            else:
+                raise
+        data = json.loads(data_str)
+        index = data['index']
+        status = data['status']
+        for log in data['logs']:
+            if verbose:
+                print(log['message'])
+            else:
+                print('.', end='')
+                sys.stdout.flush()
+
+        if status == "error":
+            print("Error: %s" % data['message'])
+            sys.exit(1)
+
+    if not verbose:
+        print('')
+
 
 
 def main():
@@ -408,7 +440,8 @@ def main():
     elif args.subparser_name == 'rm':
         rm_command(host, args.group_id, auth, args.verbose)
     elif args.subparser_name == 'update':
-        update_command(host, args.group_id, args.name, args.memsize, auth)
+        update_command(host, args.group_id, args.name,
+                       args.memsize, auth, args.verbose)
 
 if __name__ == '__main__':
     main()

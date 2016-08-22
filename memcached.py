@@ -50,88 +50,122 @@ class Memcached(group.Group):
     def create(cls, create_task, name, memsize, check_period):
         group_id = create_task.group_id
 
-        consul_obj = consul.Consul(host=global_env.consul_host,
-                                   token=global_env.consul_acl_token)
-        kv = consul_obj.kv
+        try:
+            consul_obj = consul.Consul(host=global_env.consul_host,
+                                       token=global_env.consul_acl_token)
+            kv = consul_obj.kv
 
-        create_task.log("Creating group '%s'", group_id)
+            create_task.log("Creating group '%s'", group_id)
 
-        ip1 = ip_pool.allocate_ip()
-        ip2 = ip_pool.allocate_ip()
-        creation_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            ip1 = ip_pool.allocate_ip()
+            ip2 = ip_pool.allocate_ip()
+            creation_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        kv.put('tarantool/%s/blueprint/type' % group_id, 'memcached')
-        kv.put('tarantool/%s/blueprint/name' % group_id, name)
-        kv.put('tarantool/%s/blueprint/memsize' % group_id, str(memsize))
-        kv.put('tarantool/%s/blueprint/check_period' % group_id, str(check_period))
-        kv.put('tarantool/%s/blueprint/creation_time' % group_id, creation_time)
-        kv.put('tarantool/%s/blueprint/instances/1/addr' % group_id, ip1)
-        kv.put('tarantool/%s/blueprint/instances/2/addr' % group_id, ip2)
+            kv.put('tarantool/%s/blueprint/type' % group_id, 'memcached')
+            kv.put('tarantool/%s/blueprint/name' % group_id, name)
+            kv.put('tarantool/%s/blueprint/memsize' % group_id, str(memsize))
+            kv.put('tarantool/%s/blueprint/check_period' % group_id, str(check_period))
+            kv.put('tarantool/%s/blueprint/creation_time' % group_id, creation_time)
+            kv.put('tarantool/%s/blueprint/instances/1/addr' % group_id, ip1)
+            kv.put('tarantool/%s/blueprint/instances/2/addr' % group_id, ip2)
 
-        Sense.update()
+            Sense.update()
 
-        memc = Memcached(global_env.consul_host, group_id)
+            memc = Memcached(global_env.consul_host, group_id)
 
-        memc.allocate()
-        Sense.update()
+            create_task.log("Allocating instance to physical nodes")
 
-        create_task.log("Allocated instance to physical nodes", progress=0.1)
+            memc.allocate()
+            Sense.update()
 
-        memc.register()
-        Sense.update()
+            create_task.log("Registering services")
+            memc.register()
+            Sense.update()
 
-        create_task.log("Registered services", progress=0.2)
+            create_task.log("Creating containers")
+            memc.create_containers()
+            Sense.update()
 
-        memc.create_containers()
-        Sense.update()
+            create_task.log("Enabled replication")
+            memc.enable_replication()
 
-        create_task.log("Created containers", progress=0.9)
+            create_task.log("Completed creating group")
 
-        memc.enable_replication()
 
-        create_task.log("Enabled replication", progress=1)
-        create_task.set_status(task.STATUS_SUCCESS)
+            create_task.set_status(task.STATUS_SUCCESS)
+        except Exception as ex:
+            logging.exception("Failed to create group '%s'", group_id)
+            create_task.set_status(task.STATUS_CRITICAL, str(ex))
+
+            raise
 
         return memc
 
     def delete(self, delete_task):
-        group_id = self.group_id
-        delete_task.log("Deleting group '%s'", group_id)
+        try:
+            group_id = self.group_id
 
-        self.unallocate()
-        delete_task.log("Unallocated instance")
+            delete_task.log("Unallocating instance")
+            self.unallocate()
 
-        self.unregister()
-        delete_task.log("Unregistered services")
+            delete_task.log("Unregistering services")
+            self.unregister()
 
-        self.remove_containers()
-        delete_task.log("Removed containers")
+            delete_task.log("Removing containers")
+            self.remove_containers()
 
-        self.remove_blueprint()
-        delete_task.log("Completed removing group")
+            delete_task.log("Removing blueprint")
+            self.remove_blueprint()
 
-        Sense.update()
-        delete_task.set_status(task.STATUS_SUCCESS)
+            delete_task.log("Completed removing group")
 
+            Sense.update()
+            delete_task.set_status(task.STATUS_SUCCESS)
+        except Exception as ex:
+            logging.exception("Failed to delete group '%s'", group_id)
+            delete_task.set_status(task.STATUS_CRITICAL, str(ex))
 
-    def rename(self, name):
+            raise
+
+    def update(self, name, memsize, update_task):
+        try:
+            if name and name != self.blueprint['name']:
+                self.rename(name, update_task)
+
+            if memsize and memsize != self.blueprint['memsize']:
+                self.resize(memsize, update_task)
+
+            update_task.set_status(task.STATUS_SUCCESS)
+        except Exception as ex:
+            logging.exception("Failed to update group '%s'", self.group_id)
+            update_task.set_status(task.STATUS_CRITICAL, str(ex))
+
+            raise
+
+    def rename(self, name, update_task):
         consul_obj = consul.Consul(host=global_env.consul_host,
                                    token=global_env.consul_acl_token)
         kv = consul_obj.kv
 
-        logging.info("Renaming group '%s' to '%s'",
-                     self.group_id, name)
+        msg = "Renaming group '%s' to '%s'" % (self.group_id, name)
+        update_task.log(msg)
+        logging.info(msg)
+
         kv.put('tarantool/%s/blueprint/name' % self.group_id, name)
 
 
-    def resize(self, memsize):
+    def resize(self, memsize, update_task):
         consul_obj = consul.Consul(host=global_env.consul_host,
                                    token=global_env.consul_acl_token)
         kv = consul_obj.kv
 
+        update_task.log("Resizing instance 1")
         self.resize_instance("1", memsize)
+        update_task.log("Resizing instance 2")
         self.resize_instance("2", memsize)
+
         kv.put('tarantool/%s/blueprint/memsize' % self.group_id, str(memsize))
+        update_task.log("Completed resizing")
 
     def allocate(self):
         consul_obj = consul.Consul(host=global_env.consul_host,

@@ -156,16 +156,23 @@ class Group(Resource):
         parser = reqparse.RequestParser()
         parser.add_argument('name')
         parser.add_argument('memsize', type=float, default=0.5)
+        parser.add_argument('async', type=bool, default=False)
 
         args = parser.parse_args()
 
-        if args['memsize'] and memc.blueprint['memsize'] != args['memsize']:
-            memc.resize(args['memsize'])
+        update_task = memcached.UpdateTask(group_id)
+        TASKS[update_task.task_id] = update_task
 
-        if args['name'] and memc.blueprint['name'] != args['name']:
-            memc.rename(args['name'])
+        gevent.spawn(memc.update, args['name'], args['memsize'], update_task)
 
-        return group_to_dict(group_id), 201
+        if args['async']:
+            result = {'id': update_task.group_id,
+                      'task_id': update_task.task_id}
+            return result, 202
+
+        else:
+            update_task.wait_for_completion()
+            return group_to_dict(group_id), 201
 
 
 class GroupList(Resource):
@@ -351,8 +358,11 @@ def resize_group(group_id):
     except ValueError:
         return flask.redirect("/groups")
 
+    update_task = memcached.UpdateTask(group_id)
+    TASKS[update_task.task_id] = update_task
+
     memc = memcached.Memcached.get(group_id)
-    memc.resize(memsize)
+    memc.resize(memsize, update_task)
 
     return flask.redirect("/groups")
 
