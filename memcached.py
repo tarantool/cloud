@@ -127,13 +127,37 @@ class Memcached(group.Group):
 
             raise
 
-    def update(self, name, memsize, update_task):
+    def upgrade(self, upgrade_task):
+        try:
+            group_id = self.group_id
+
+            upgrade_task.log("Upgrading container 1")
+            self.upgrade_container("1")
+
+            upgrade_task.log("Upgrading container 2")
+            self.upgrade_container("2")
+
+            upgrade_task.log("Completed upgrading containers")
+
+            Sense.update()
+            upgrade_task.set_status(task.STATUS_SUCCESS)
+        except Exception as ex:
+            logging.exception("Failed to upgrade group '%s'", group_id)
+            upgrade_task.set_status(task.STATUS_CRITICAL, str(ex))
+
+            raise
+
+
+    def update(self, name, memsize, docker_image_name, update_task):
         try:
             if name and name != self.blueprint['name']:
                 self.rename(name, update_task)
 
             if memsize and memsize != self.blueprint['memsize']:
                 self.resize(memsize, update_task)
+
+            if docker_image_name:
+                self.upgrade(update_task)
 
             update_task.set_status(task.STATUS_SUCCESS)
         except Exception as ex:
@@ -446,6 +470,107 @@ class Memcached(group.Group):
                                                 ipv4_address=addr)
         docker_obj.start(container=container.get('Id'))
 
+    def upgrade_container(self, instance_num):
+        group_id = self.group_id
+
+        logging.info("Upgrading container '%s'", group_id)
+
+        blueprint = self.blueprint
+        allocation = self.allocation
+
+        instance_id = self.group_id + '_' + instance_num
+        addr = blueprint['instances'][instance_num]['addr']
+        memsize = blueprint['memsize']
+        network_settings = Sense.network_settings()
+        network_name = network_settings['network_name']
+        if not network_name:
+            raise RuntimeError("Network name is not specified in settings")
+
+        docker_host = allocation['instances'][instance_num]['host']
+        docker_hosts = Sense.docker_hosts()
+
+        docker_addr = None
+        for host in docker_hosts:
+            if host['addr'].split(':')[0] == docker_host or \
+               host['consul_host'] == docker_host:
+                docker_addr = host['addr']
+
+        if not docker_addr:
+            raise RuntimeError("No such Docker host: '%s'" % docker_host)
+
+        replica_ip = None
+        if instance_num == '2':
+            replica_ip = blueprint['instances']['1']['addr']
+
+        docker_obj = docker.Client(base_url=docker_addr,
+                                   tls=global_env.docker_tls_config)
+
+        self.ensure_image(docker_addr)
+        self.ensure_network(docker_addr)
+
+        mounts = docker_obj.inspect_container(instance_id)["Mounts"]
+        binds = []
+        for mount in mounts:
+            if mount['Destination'] == '/opt/tarantool':
+                # code should be upgraded along with container
+                continue
+
+            logging.info("Keeping mount %s:%s",
+                         mount["Source"], mount["Destination"])
+            rw_flag = "rw" if mount['RW'] else "ro"
+            binds.append("%s:%s:%s" % (mount['Source'],
+                                       mount['Destination'],
+                                       rw_flag))
+
+        docker_obj.stop(container=instance_id)
+        docker_obj.remove_container(container=instance_id)
+
+        host_config = docker_obj.create_host_config(
+            restart_policy =
+            {
+                "MaximumRetryCount": 0,
+                "Name": "unless-stopped"
+            },
+            binds = binds
+        )
+
+        cmd = 'tarantool /opt/tarantool/app.lua'
+
+        networking_config = {
+            'EndpointsConfig':
+            {
+                network_name:
+                {
+                    'IPAMConfig':
+                    {
+                        "IPv4Address": addr,
+                        "IPv6Address": ""
+                    },
+                    "Links": [],
+                    "Aliases": []
+                }
+            }
+        }
+
+        environment = {}
+
+        environment['TARANTOOL_SLAB_ALLOC_ARENA'] = memsize
+
+        if replica_ip:
+            environment['TARANTOOL_REPLICATION_SOURCE'] = replica_ip + ':3301'
+
+        container = docker_obj.create_container(image='tarantool-cloud-memcached',
+                                                name=instance_id,
+                                                command=cmd,
+                                                host_config=host_config,
+                                                networking_config=networking_config,
+                                                environment=environment,
+                                                labels=['tarantool'])
+
+        docker_obj.connect_container_to_network(container.get('Id'),
+                                                network_name,
+                                                ipv4_address=addr)
+        docker_obj.start(container=container.get('Id'))
 
     def remove_container(self, instance_num):
         containers = self.containers

@@ -216,6 +216,8 @@ class Sense(object):
                     net = container['NetworkSettings']['Networks'][network_name]
                     addr = net['IPAMConfig']['IPv4Address'] + ':3301'
                 is_running = container['State'] == 'running'
+                image_name = container['Image']
+                image_id = container['ImageID'].split(':')[1]
 
                 if group not in groups:
                     groups[group] = {}
@@ -224,7 +226,9 @@ class Sense(object):
                 groups[group]['instances'][instance_id] = {
                     'addr': addr,
                     'host': host,
-                    'is_running': is_running
+                    'is_running': is_running,
+                    'docker_image_name': image_name,
+                    'docker_image_id': image_id
                 }
 
         return groups

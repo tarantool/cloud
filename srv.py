@@ -86,6 +86,8 @@ def group_to_dict(group_id):
     blueprint = memc.blueprint
     allocation = memc.allocation
     services = memc.services
+    containers = sense.Sense.containers().get(group_id,
+                                              {'instances': {}})
 
     state = 'passing'
 
@@ -102,12 +104,20 @@ def group_to_dict(group_id):
         instance_id = group_id + '_' + instance_num
         instance_state = services['instances'][instance_num]['status']
 
+        image_name = None
+        image_id = None
+        if instance_num in containers['instances']:
+            image_name = containers['instances'][instance_num]['docker_image_name']
+            image_id = containers['instances'][instance_num]['docker_image_id']
+
         instances.append({'id': instance_id,
                           'name': name,
                           'addr': addr,
                           'type': type_str,
                           'host': host,
-                          'state': state_to_dict(instance_state)})
+                          'state': state_to_dict(instance_state),
+                          'docker_image_name': image_name,
+                          'docker_image_id': image_id})
 
 
     result = {'name': blueprint['name'],
@@ -157,13 +167,18 @@ class Group(Resource):
         parser.add_argument('name')
         parser.add_argument('memsize', type=float, default=0.5)
         parser.add_argument('async', type=bool, default=False)
+        parser.add_argument('docker_image_name')
 
         args = parser.parse_args()
 
         update_task = memcached.UpdateTask(group_id)
         TASKS[update_task.task_id] = update_task
 
-        gevent.spawn(memc.update, args['name'], args['memsize'], update_task)
+        gevent.spawn(memc.update,
+                     args['name'],
+                     args['memsize'],
+                     args['docker_image_name'],
+                     update_task)
 
         if args['async']:
             result = {'id': update_task.group_id,
