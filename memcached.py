@@ -657,7 +657,7 @@ class Memcached(group.Group):
     def ensure_image(self, docker_addr):
         docker_obj = docker.Client(base_url=docker_addr,
                                    tls=global_env.docker_tls_config)
-        image_exists = any(['tarantool-cloud-memcached:latest' in i['RepoTags']
+        image_exists = any(['tarantool-cloud-memcached:latest' in (i['RepoTags'] or [])
                             for i in docker_obj.images()])
 
         if image_exists:

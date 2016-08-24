@@ -165,7 +165,7 @@ class Group(Resource):
         parser = reqparse.RequestParser()
         parser = reqparse.RequestParser()
         parser.add_argument('name')
-        parser.add_argument('memsize', type=float, default=0.5)
+        parser.add_argument('memsize', type=float)
         parser.add_argument('async', type=bool, default=False)
         parser.add_argument('docker_image_name')
 
