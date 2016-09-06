@@ -1,0 +1,20 @@
+---
+
+- hosts: localhost
+  tasks:
+    - name: "Check CA group size"
+      fail: msg="There should only be exactly one host in 'ca' group"
+      when: groups['ca']|length != 1
+
+- hosts: ca
+  roles:
+    - { role: 'ca', tags: ['ca'] }
+
+- hosts: cloud-node
+  roles:
+    - node
+    - docker
+
+- hosts: cloud-node
+  roles:
+    - consul

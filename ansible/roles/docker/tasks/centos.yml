@@ -1,0 +1,32 @@
+---
+
+- name: Add docker repository
+  yum_repository:
+    name: Docker_Repository
+    description: Docker YUM repo
+    baseurl: https://yum.dockerproject.org/repo/main/centos/$releasever/
+    enabled: yes
+    gpgcheck: yes
+    gpgkey: '{{ docker_rpm_key_url }}'
+
+- name: Add epel repository
+  yum_repository:
+    name: EPEL_Repository
+    description: EPEL YUM repo
+    #baseurl: http://download.fedoraproject.org/pub/epel/$releasever/$basearch/
+    mirrorlist: https://mirrors.fedoraproject.org/metalink?repo=epel-$releasever&arch=$basearch
+    enabled: yes
+    gpgcheck: yes
+    gpgkey: https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-$releasever
+
+
+- name: installs 'docker-engine'
+  yum:
+    name: docker-engine
+    update_cache: yes
+    state: present
+
+- name: installs 'python-pip'
+  yum:
+    name: python-pip
+    state: present

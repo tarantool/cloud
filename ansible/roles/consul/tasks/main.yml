@@ -1,0 +1,133 @@
+---
+
+- include: ubuntu.yml
+  when: ansible_distribution == 'Ubuntu'
+
+- include: centos.yml
+  when: ansible_distribution == 'CentOS'
+
+- name: installs 'python-consul'
+  pip:
+    name: python-consul
+
+- name: installs 'pyhcl'
+  pip:
+    name: pyhcl
+
+- name: creates consul config directory
+  file:
+    state: directory
+    path: '/etc/consul'
+
+- name: creates consul data directory
+  file:
+    state: directory
+    path: '/var/consul'
+    owner: 100
+    group: 1000
+
+- set_fact:
+    consul_retry_join: >
+      {{ '"' + (groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list | join('", "')) + '"'}}
+
+- name: creates consul configuration file
+  template:
+    src: 'consul.json.j2'
+    dest: '/etc/consul/config.json'
+  notify:
+    - 'restart consul'
+
+- name: retrieves and launches 'consul' image in server mode
+  docker:
+    docker_api_version: '{{ docker_api_version }}'
+    image: 'consul'
+    volumes:
+      - '/var/consul:/consul/data'
+      - '/etc/consul:/consul/config:ro'
+      - '/etc/tarantool-cloud/tls:/consul/tls:ro'
+    net: host
+    name: consul
+    command: 'agent -server'
+    state: started
+    pull: always
+    restart_policy: always
+    restart_policy_retry: 3
+  when: consul_server == 'true'
+
+- name: retrieves and launches 'consul' image in client mode
+  docker:
+    docker_api_version: '{{ docker_api_version }}'
+    image: 'consul'
+    volumes:
+      - '/var/consul:/consul/data'
+      - '/etc/consul:/consul/config:ro'
+      - '/etc/tarantool-cloud/tls:/consul/tls:ro'
+    net: host
+    name: consul
+    command: 'agent'
+    state: started
+    pull: always
+    restart_policy: always
+    restart_policy_retry: 3
+  when: consul_server != 'true'
+
+- name: creates acl token for consul servers
+  consul_acl:
+    mgmt_token: '{{consul_acl_master_token}}'
+    name: 'Consul agent access token'
+    token: '{{consul_acl_token}}'
+    rules:
+      - service: ''
+        policy: read
+      - key: ''
+        policy: write
+
+- name: allow access to consul RPC from the cluster
+  iptables:
+    chain: INPUT
+    source: "{{item}}"
+    protocol: tcp
+    destination_port: 8300
+    jump: ACCEPT
+  with_items: >
+    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+
+- name: allow access to Serf LAN (tcp) from the cluster
+  iptables:
+    chain: INPUT
+    source: "{{item}}"
+    protocol: tcp
+    destination_port: 8301
+    jump: ACCEPT
+  with_items: >
+    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+
+- name: allow access to Serf LAN (udp) from the cluster
+  iptables:
+    chain: INPUT
+    source: "{{item}}"
+    protocol: udp
+    destination_port: 8301
+    jump: ACCEPT
+  with_items: >
+    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+
+- name: allow access to Serf WAN (tcp) from the cluster
+  iptables:
+    chain: INPUT
+    source: "{{item}}"
+    protocol: tcp
+    destination_port: 8302
+    jump: ACCEPT
+  with_items: >
+    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+
+- name: allow access to Serf WAN (udp) from the cluster
+  iptables:
+    chain: INPUT
+    source: "{{item}}"
+    protocol: udp
+    destination_port: 8302
+    jump: ACCEPT
+  with_items: >
+    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}

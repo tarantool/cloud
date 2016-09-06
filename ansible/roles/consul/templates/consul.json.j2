@@ -1,0 +1,21 @@
+{
+  "bootstrap_expect": 3,
+  "retry_join": [{{consul_retry_join.strip()}}],
+  "check_update_interval": "0s",
+  "advertise_addr": "{{hostvars[inventory_hostname]["ansible_"+advertise_interface.replace("-","_")]["ipv4"]["address"]}}",
+  "bind_addr": "0.0.0.0",
+  "client_addr": "0.0.0.0",
+  "ui": true,
+  "encrypt": "{{consul_gossip_key}}",
+  "verify_incoming": true,
+  "verify_outgoing": true,
+  "verify_server_hostname": false,
+  "ca_file": "/consul/tls/ca.pem",
+  "cert_file": "/consul/tls/server-cert.pem",
+  "key_file": "/consul/tls/server-key.pem",
+  "acl_datacenter": "dc1",
+  "acl_default_policy": "deny",
+  "acl_down_policy": "deny",
+  "acl_master_token": "{{consul_acl_master_token}}",
+  "acl_token": "anonymous"
+}

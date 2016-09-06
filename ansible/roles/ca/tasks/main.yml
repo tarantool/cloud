@@ -1,0 +1,62 @@
+---
+
+- debug: msg="Generating CA keys on {{inventory_hostname}}"
+
+- set_fact:
+    tarantool_cloud_tls_dir: '{{playbook_dir}}/certs'
+  when: inventory_hostname == 'localhost'
+
+- set_fact:
+    tarantool_cloud_tls_dir: '{{tarantool_cloud_tls_dir_default}}'
+  when: inventory_hostname != 'localhost'
+
+- set_fact:
+    tarantool_cloud_tls_ca_cert_file: '{{tarantool_cloud_tls_dir}}/ca.pem'
+    tarantool_cloud_tls_ca_key_file: '{{tarantool_cloud_tls_dir}}/ca-key.pem'
+    tarantool_cloud_tls_server_cert_file: '{{tarantool_cloud_tls_dir}}/server-cert.pem'
+    tarantool_cloud_tls_server_key_file: '{{tarantool_cloud_tls_dir}}/server-key.pem'
+    tarantool_cloud_tls_client_cert_file: '{{tarantool_cloud_tls_dir}}/client-cert.pem'
+    tarantool_cloud_tls_client_key_file: '{{tarantool_cloud_tls_dir}}/client-key.pem'
+    tarantool_cloud_tls_client_csr_file: '{{tarantool_cloud_tls_dir}}/client.csr'
+    tarantool_cloud_tls_client_ext_file: '{{tarantool_cloud_tls_dir}}/client-extfile.cnf'
+
+
+- name: generates RSA private key for CA
+  command: 'openssl genrsa -aes256 -out "{{ tarantool_cloud_tls_ca_key_file }}" -passout "pass:{{tarantool_cloud_tls_ca_key_password}}" 4096'
+  no_log: True
+  args:
+    chdir: '{{ tarantool_cloud_tls_dir }}'
+    creates: '{{ tarantool_cloud_tls_ca_key_file }}'
+
+
+- name: generates CA certificate
+  command: 'openssl req -new -x509 -days 365 -key ca-key.pem -sha256 -passin "pass:{{tarantool_cloud_tls_ca_key_password}}" -out {{tarantool_cloud_tls_ca_cert_file}} -subj "/CN={{tarantool_cloud_tls_ca_common_name}}"'
+  no_log: True
+  args:
+    chdir: '{{ tarantool_cloud_tls_dir }}'
+    creates: '{{ tarantool_cloud_tls_ca_cert_file }}'
+
+- name: generates client key
+  command: 'openssl genrsa -out "{{tarantool_cloud_tls_client_key_file}}" 4096'
+  args:
+    chdir: '{{ tarantool_cloud_tls_dir }}'
+    creates: '{{ tarantool_cloud_tls_client_key_file }}'
+
+- name: generates client CSR
+  command: 'openssl req -subj "/CN=client" -new -key "{{tarantool_cloud_tls_client_key_file}}" -out "{{tarantool_cloud_tls_client_csr_file}}"'
+  args:
+    chdir: '{{ tarantool_cloud_tls_dir }}'
+    creates: '{{ tarantool_cloud_tls_client_csr_file }}'
+
+- name: create client extfile
+  copy:
+    content="extendedKeyUsage = clientAuth\n"
+    dest='{{tarantool_cloud_tls_client_ext_file}}'
+
+- name: sign client cert
+  command: 'openssl x509 -req -days 3650 -sha256 -in "{{tarantool_cloud_tls_client_csr_file}}" -passin "pass:{{tarantool_cloud_tls_ca_key_password}}" -CA "{{tarantool_cloud_tls_ca_cert_file}}" -CAkey "{{tarantool_cloud_tls_ca_key_file}}" \
+  -CAcreateserial -out "{{tarantool_cloud_tls_client_cert_file}}" -extfile "{{tarantool_cloud_tls_client_ext_file}}"'
+  no_log: True
+  args:
+    chdir: '{{ tarantool_cloud_tls_dir }}'
+    creates: '{{ tarantool_cloud_tls_client_cert_file }}'

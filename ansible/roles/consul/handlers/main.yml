@@ -1,0 +1,5 @@
+---
+- name: restart consul
+  docker_container:
+    name: consul
+    restart: yes

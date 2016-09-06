@@ -1,0 +1,70 @@
+---
+
+- include: ubuntu.yml
+  when: ansible_distribution == 'Ubuntu'
+
+- include: centos.yml
+  when: ansible_distribution == 'CentOS'
+
+- name: installs 'docker-py'
+  pip:
+    name: docker-py
+
+- name: adds 'docker' to start on boot
+  service:
+    name: docker
+    enabled: yes
+
+- name: creates docker service directory
+  file:
+    state: directory
+    path: '/etc/systemd/system/docker.service.d/'
+
+- name: creates docker configuration file
+  template:
+    src: 'docker.conf.j2'
+    dest: '/etc/systemd/system/docker.service.d/docker.conf'
+  notify:
+    - 'daemon-reload'
+    - 'restart docker'
+
+- name: allow access to Docker port from the cluster
+  iptables:
+    chain: INPUT
+    source: "{{item}}"
+    protocol: tcp
+    destination_port: 2376
+    jump: ACCEPT
+  with_items: >
+    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+
+- name: allow access to overlay control plane (tcp) from the cluster
+  iptables:
+    chain: INPUT
+    source: "{{item}}"
+    protocol: tcp
+    destination_port: 7946
+    jump: ACCEPT
+  with_items: >
+    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+
+- name: allow access to overlay control plane (udp) from the cluster
+  iptables:
+    chain: INPUT
+    source: "{{item}}"
+    protocol: udp
+    destination_port: 7946
+    jump: ACCEPT
+  with_items: >
+    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+
+
+- name: allow access to overlay data plane from the cluster
+  iptables:
+    chain: INPUT
+    source: "{{item}}"
+    protocol: udp
+    destination_port: 4789
+    jump: ACCEPT
+  with_items: >
+    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}

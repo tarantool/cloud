@@ -1,0 +1,5 @@
+---
+- name: installs 'python-pip'
+  yum:
+    name: python-pip
+    state: present

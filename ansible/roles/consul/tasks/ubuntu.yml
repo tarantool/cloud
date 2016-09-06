@@ -1,0 +1,5 @@
+---
+- name: installs 'python-pip'
+  apt:
+    name: python-pip
+    state: present

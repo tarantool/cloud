@@ -1,0 +1,108 @@
+---
+
+- debug: msg="Generating server keys on {{groups['ca'][0]}}"
+
+- name: create directory for server certificates
+  vars:
+    ca_host: '{{groups["ca"][0]}}'
+    tarantool_cloud_tls_server_dir: '{{hostvars[ca_host]["tarantool_cloud_tls_dir"]}}/servers/{{inventory_hostname}}'
+  file: path='{{tarantool_cloud_tls_server_dir}}' state=directory
+  delegate_to: '{{ca_host}}'
+
+- name: generate server key
+  vars:
+    ca_host: '{{groups["ca"][0]}}'
+    tarantool_cloud_tls_server_dir: '{{hostvars[ca_host]["tarantool_cloud_tls_dir"]}}/servers/{{inventory_hostname}}'
+    tarantool_cloud_tls_server_key_file: '{{tarantool_cloud_tls_server_dir}}/server-key.pem'
+  command: 'openssl genrsa -out "{{tarantool_cloud_tls_server_key_file}}" 4096'
+  args:
+    chdir: '{{ tarantool_cloud_tls_server_dir }}'
+    creates: '{{ tarantool_cloud_tls_server_key_file }}'
+
+  delegate_to: '{{ca_host}}'
+
+- name: generate server CSR
+  vars:
+    ca_host: '{{groups["ca"][0]}}'
+    tarantool_cloud_tls_server_dir: '{{hostvars[ca_host]["tarantool_cloud_tls_dir"]}}/servers/{{inventory_hostname}}'
+    tarantool_cloud_tls_server_key_file: '{{tarantool_cloud_tls_server_dir}}/server-key.pem'
+    tarantool_cloud_tls_server_csr_file: '{{tarantool_cloud_tls_server_dir}}/server.csr'
+  command: 'openssl req -subj "/CN={{ansible_fqdn}}" -sha256 -new -key {{tarantool_cloud_tls_server_key_file}} -out {{tarantool_cloud_tls_server_csr_file}}'
+  args:
+    chdir: '{{ tarantool_cloud_tls_server_dir }}'
+    creates: '{{ tarantool_cloud_tls_server_csr_file }}'
+
+  delegate_to: '{{ca_host}}'
+
+- name: generate server extfile
+  vars:
+    ca_host: '{{groups["ca"][0]}}'
+    tarantool_cloud_tls_server_dir: '{{hostvars[ca_host]["tarantool_cloud_tls_dir"]}}/servers/{{inventory_hostname}}'
+    tarantool_cloud_tls_server_ext_file: '{{tarantool_cloud_tls_server_dir}}/server-extfile.cnf'
+    subject_alt_name: '
+      {% for interface in ansible_interfaces %}
+      {% if "ipv4" in hostvars[inventory_hostname]["ansible_"+interface.replace("-","_")] %}
+      IP:{{hostvars[inventory_hostname]["ansible_"+interface.replace("-","_")]["ipv4"]["address"]}},
+      {% endif %}
+      {% endfor %} DNS:{{ansible_hostname}}, DNS:{{ansible_hostname}}.dc1.consul,'
+  copy:
+    content="subjectAltName = {{subject_alt_name.strip()[:-1]}}\n extendedKeyUsage=serverAuth,clientAuth"
+    dest='{{tarantool_cloud_tls_server_ext_file}}'
+  delegate_to: '{{ca_host}}'
+
+
+- name: sign server certificate
+  vars:
+    ca_host: '{{groups["ca"][0]}}'
+    tarantool_cloud_tls_ca_cert_file: '{{hostvars[ca_host]["tarantool_cloud_tls_ca_cert_file"]}}'
+    tarantool_cloud_tls_ca_key_file: '{{hostvars[ca_host]["tarantool_cloud_tls_ca_key_file"]}}'
+    tarantool_cloud_tls_server_dir: '{{hostvars[ca_host]["tarantool_cloud_tls_dir"]}}/servers/{{inventory_hostname}}'
+    tarantool_cloud_tls_server_ext_file: '{{tarantool_cloud_tls_server_dir}}/server-extfile.cnf'
+    tarantool_cloud_tls_server_csr_file: '{{tarantool_cloud_tls_server_dir}}/server.csr'
+    tarantool_cloud_tls_server_key_file: '{{tarantool_cloud_tls_server_dir}}/server-key.pem'
+    tarantool_cloud_tls_server_cert_file: '{{tarantool_cloud_tls_server_dir}}/server-cert.pem'
+    tarantool_cloud_tls_ca_key_password: '{{hostvars[ca_host]["tarantool_cloud_tls_ca_key_password"]}}'
+
+  command: 'openssl x509 -req -days 365 -sha256 -in "{{tarantool_cloud_tls_server_csr_file}}" -CA "{{tarantool_cloud_tls_ca_cert_file}}" -CAkey "{{tarantool_cloud_tls_ca_key_file}}" -CAcreateserial -out "{{tarantool_cloud_tls_server_cert_file}}" -extfile "{{tarantool_cloud_tls_server_ext_file}}" -passin "pass:{{tarantool_cloud_tls_ca_key_password}}"'
+  no_log: True
+  args:
+    chdir: '{{ tarantool_cloud_tls_server_dir }}'
+    creates: '{{ tarantool_cloud_tls_server_cert_file }}'
+  delegate_to: '{{ca_host}}'
+
+- name: create certificate directory
+  file: path='{{tarantool_cloud_tls_dir_default}}' state=directory
+
+- name: create local certificate directory
+  vars:
+    ca_host: '{{groups["ca"][0]}}'
+  file: path='{{playbook_dir}}/certs/servers/{{inventory_hostname}}' state=directory
+  delegate_to: '{{ca_host}}'
+
+- name: fetch certificates
+  vars:
+    ca_host: '{{groups["ca"][0]}}'
+    tarantool_cloud_tls_dir: '{{hostvars[ca_host]["tarantool_cloud_tls_dir"]}}'
+    tarantool_cloud_tls_server_dir: '{{hostvars[ca_host]["tarantool_cloud_tls_dir"]}}/servers/{{inventory_hostname}}'
+  fetch: src='{{item}}' dest='certs/servers/{{inventory_hostname}}/' flat=yes fail_on_missing=yes
+  with_items:
+    - '{{tarantool_cloud_tls_server_dir}}/server-key.pem'
+    - '{{tarantool_cloud_tls_server_dir}}/server-cert.pem'
+    - '{{tarantool_cloud_tls_dir}}/client-key.pem'
+    - '{{tarantool_cloud_tls_dir}}/client-cert.pem'
+    - '{{tarantool_cloud_tls_dir}}/ca.pem'
+
+  delegate_to: '{{ca_host}}'
+
+- name: deploy certificates
+  vars:
+    ca_host: '{{groups["ca"][0]}}'
+    tarantool_cloud_tls_dir: '{{hostvars[ca_host]["tarantool_cloud_tls_dir"]}}'
+    tarantool_cloud_tls_server_dir: '{{hostvars[ca_host]["tarantool_cloud_tls_dir"]}}/servers/{{inventory_hostname}}'
+  copy: src='certs/servers/{{inventory_hostname}}/{{item}}' dest='{{tarantool_cloud_tls_dir_default}}/'
+  with_items:
+    - 'server-key.pem'
+    - 'server-cert.pem'
+    - 'client-key.pem'
+    - 'client-cert.pem'
+    - 'ca.pem'

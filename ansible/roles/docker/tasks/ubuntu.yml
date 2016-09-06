@@ -1,0 +1,34 @@
+---
+
+- name: installs 'apt-transport-https'
+  apt:
+    name: apt-transport-https
+    state: present
+
+- name: installs 'ca-certificates'
+  apt:
+    name: ca-certificates
+    state: present
+
+- name: adds new gpg key
+  apt_key:
+    keyserver: '{{ docker_key_server }}'
+    id: '{{ docker_key_id }}'
+    state: present
+
+- name: Add docker repository
+  apt_repository:
+    repo: 'deb https://apt.dockerproject.org/repo ubuntu-{{ansible_distribution_release}} main'
+    state: present
+
+- name: installs 'docker'
+  apt:
+    name: docker-engine
+    update_cache: yes
+    cache_valid_time: 0
+    state: present
+
+- name: installs 'python-pip'
+  apt:
+    name: python-pip
+    state: present

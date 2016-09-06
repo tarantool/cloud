@@ -1,0 +1,2 @@
+---
+tarantool_cloud_tls_dir_default: '/etc/tarantool-cloud/tls'
