@@ -26,9 +26,28 @@
     owner: 100
     group: 1000
 
+
+- set_fact:
+    cluster_ips: '{{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}'
+  when: advertise_interface is defined
+
+- set_fact:
+    advertise_addr: '{{hostvars[inventory_hostname]["ansible_"+advertise_interface.replace("-","_")]["ipv4"]["address"]}}'
+  when: advertise_interface is defined
+
+
+- set_fact:
+    cluster_ips: '{{ groups["cloud-node"] | map("extract", hostvars, ["ansible_default_ipv4", "address"]) | list }}'
+  when: advertise_interface is undefined
+
+- set_fact:
+    advertise_addr: '{{ ansible_default_ipv4["address"] }}'
+  when: advertise_interface is undefined
+
 - set_fact:
     consul_retry_join: >
-      {{ '"' + (groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list | join('", "')) + '"'}}
+      {{ '"' + (cluster_ips | join('", "')) + '"'}}
+
 
 - name: creates consul configuration file
   template:
@@ -38,37 +57,37 @@
     - 'restart consul'
 
 - name: retrieves and launches 'consul' image in server mode
-  docker:
+  docker_container:
     docker_api_version: '{{ docker_api_version }}'
     image: 'consul'
     volumes:
       - '/var/consul:/consul/data'
       - '/etc/consul:/consul/config:ro'
       - '/etc/tarantool-cloud/tls:/consul/tls:ro'
-    net: host
+    network_mode: host
     name: consul
-    command: 'agent -server'
+    command: ['agent', '-server']
     state: started
-    pull: always
+    pull: true
     restart_policy: always
-    restart_policy_retry: 3
+    restart_retries: 3
   when: consul_server == 'true'
 
 - name: retrieves and launches 'consul' image in client mode
-  docker:
-    docker_api_version: '{{ docker_api_version }}'
+  docker_container:
+    api_version: '{{ docker_api_version }}'
     image: 'consul'
     volumes:
       - '/var/consul:/consul/data'
       - '/etc/consul:/consul/config:ro'
       - '/etc/tarantool-cloud/tls:/consul/tls:ro'
-    net: host
+    network_mode: host
     name: consul
     command: 'agent'
     state: started
-    pull: always
+    pull: true
     restart_policy: always
-    restart_policy_retry: 3
+    restart_retries: 3
   when: consul_server != 'true'
 
 - name: creates acl token for consul servers
@@ -78,7 +97,7 @@
     token: '{{consul_acl_token}}'
     rules:
       - service: ''
-        policy: read
+        policy: write
       - key: ''
         policy: write
 
@@ -89,8 +108,7 @@
     protocol: tcp
     destination_port: 8300
     jump: ACCEPT
-  with_items: >
-    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+  with_items: '{{cluster_ips}}'
 
 - name: allow access to Serf LAN (tcp) from the cluster
   iptables:
@@ -99,8 +117,7 @@
     protocol: tcp
     destination_port: 8301
     jump: ACCEPT
-  with_items: >
-    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+  with_items: '{{cluster_ips}}'
 
 - name: allow access to Serf LAN (udp) from the cluster
   iptables:
@@ -109,8 +126,7 @@
     protocol: udp
     destination_port: 8301
     jump: ACCEPT
-  with_items: >
-    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+  with_items: '{{cluster_ips}}'
 
 - name: allow access to Serf WAN (tcp) from the cluster
   iptables:
@@ -119,8 +135,7 @@
     protocol: tcp
     destination_port: 8302
     jump: ACCEPT
-  with_items: >
-    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+  with_items: '{{cluster_ips}}'
 
 - name: allow access to Serf WAN (udp) from the cluster
   iptables:
@@ -129,5 +144,4 @@
     protocol: udp
     destination_port: 8302
     jump: ACCEPT
-  with_items: >
-    {{ groups["cloud-node"] | map("extract", hostvars, ["ansible_"+advertise_interface.replace("-","_"), "ipv4", "address"]) | list }}
+  with_items: '{{cluster_ips}}'

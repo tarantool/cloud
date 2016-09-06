@@ -18,3 +18,4 @@
 - hosts: cloud-node
   roles:
     - consul
+    - registrator

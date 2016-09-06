@@ -1,8 +1,10 @@
 {
-  "bootstrap_expect": 3,
+  {% if consul_server == 'true' %}
+    "bootstrap_expect": 3,
+  {% endif%}
   "retry_join": [{{consul_retry_join.strip()}}],
   "check_update_interval": "0s",
-  "advertise_addr": "{{hostvars[inventory_hostname]["ansible_"+advertise_interface.replace("-","_")]["ipv4"]["address"]}}",
+  "advertise_addr": "{{advertise_addr}}",
   "bind_addr": "0.0.0.0",
   "client_addr": "0.0.0.0",
   "ui": true,
