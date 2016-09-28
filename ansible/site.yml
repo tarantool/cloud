@@ -19,3 +19,4 @@
   roles:
     - consul
     - registrator
+#    - prometheus-exporter

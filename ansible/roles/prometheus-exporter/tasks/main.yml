@@ -1,0 +1,39 @@
+---
+
+- name: creates node-exporter-fe directory
+  file:
+    state: directory
+    path: '/etc/node-exporter-fe'
+
+
+- name: upload the docker image directory
+  copy:
+    src="{{role_path}}/files/"
+    dest=/etc/node-exporter-fe
+
+- name: Build a node exporter image
+  docker_image:
+    path: "/etc/node-exporter-fe"
+    dockerfile: Dockerfile
+    name: node-exporter-basic-auth
+    tag: latest
+    pull: false
+
+- name: launches 'node-exporter-basic-auth' image
+  docker_container:
+    docker_api_version: '{{ docker_api_version }}'
+    image: 'node-exporter-basic-auth:latest'
+    volumes:
+      - "/proc:/host/proc:ro"
+      - "/sys:/host/sys:ro"
+      - "/:/rootfs:ro"
+    env:
+      PROMETHEUS_PASSWORD: "{{prometheus_exposer_password}}"
+      SERVICE_NAME: node-exporter
+    network_mode: host
+    name: node-exporter
+    ports:
+      - "9100:9100"
+    state: started
+    restart_policy: always
+    restart_retries: 3

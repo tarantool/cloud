@@ -1,0 +1,2 @@
+nginx: nginx
+node_exporter: node_exporter -web.listen-address 127.0.0.1:9101 -collector.procfs /host/proc -collector.sysfs /host/sys -collector.filesystem.ignored-mount-points '^/(sys|proc|dev|host|etc|rootfs/var/lib/docker)($|/)'

@@ -6,6 +6,10 @@
 - include: centos.yml
   when: ansible_distribution == 'CentOS'
 
+- include: redhat.yml
+  when: ansible_distribution == 'RedHat'
+
+
 - name: installs 'docker-py'
   pip:
     name: docker-py

@@ -4,7 +4,7 @@
   when: ansible_distribution == 'Ubuntu'
 
 - include: centos.yml
-  when: ansible_distribution == 'CentOS'
+  when: ansible_distribution == 'CentOS' or ansible_distribution == 'RedHat'
 
 - name: installs 'python-consul'
   pip:
@@ -62,11 +62,18 @@
     image: 'consul'
     volumes:
       - '/var/consul:/consul/data'
-      - '/etc/consul:/consul/config:ro'
+      - '/etc/consul:/consul/config'
       - '/etc/tarantool-cloud/tls:/consul/tls:ro'
+      - '/etc/tarantool-cloud/tls/client-cert.pem:/docker/tls/cert.pem'
+      - '/etc/tarantool-cloud/tls/client-key.pem:/docker/tls/key.pem'
+      - '/etc/tarantool-cloud/tls/ca.pem:/docker/tls/ca.pem'
+    env:
+      DOCKER_HOST: 'tcp://{{ ansible_default_ipv4["address"] }}:2376'
+      DOCKER_TLS_VERIFY: '1'
+      DOCKER_CERT_PATH: '/docker/tls'
     network_mode: host
     name: consul
-    command: ['agent', '-server']
+    command: agent -server
     state: started
     pull: true
     restart_policy: always
@@ -81,6 +88,13 @@
       - '/var/consul:/consul/data'
       - '/etc/consul:/consul/config:ro'
       - '/etc/tarantool-cloud/tls:/consul/tls:ro'
+      - '/etc/tarantool-cloud/tls/client-cert.pem:/docker/tls/cert.pem'
+      - '/etc/tarantool-cloud/tls/client-key.pem:/docker/tls/key.pem'
+      - '/etc/tarantool-cloud/tls/ca.pem:/docker/tls/ca.pem'
+    env:
+      DOCKER_HOST: '{{ ansible_default_ipv4["address"] }}:2376'
+      DOCKER_TLS_VERIFY: '1'
+      DOCKER_CERT_PATH: '/docker/tls'
     network_mode: host
     name: consul
     command: 'agent'
@@ -127,6 +141,25 @@
     destination_port: 8301
     jump: ACCEPT
   with_items: '{{cluster_ips}}'
+
+- name: allow access to Serf LAN (tcp) from the cluster
+  iptables:
+    chain: INPUT
+    source: "{{item}}"
+    protocol: tcp
+    destination_port: 7946
+    jump: ACCEPT
+  with_items: '{{cluster_ips}}'
+
+- name: allow access to Serf LAN (udp) from the cluster
+  iptables:
+    chain: INPUT
+    source: "{{item}}"
+    protocol: udp
+    destination_port: 7946
+    jump: ACCEPT
+  with_items: '{{cluster_ips}}'
+
 
 - name: allow access to Serf WAN (tcp) from the cluster
   iptables:

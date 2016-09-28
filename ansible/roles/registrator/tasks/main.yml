@@ -1,0 +1,31 @@
+- set_fact:
+    advertise_addr: '{{hostvars[inventory_hostname]["ansible_"+advertise_interface.replace("-","_")]["ipv4"]["address"]}}'
+  when: advertise_interface is defined
+
+- set_fact:
+    advertise_addr: '{{ ansible_default_ipv4["address"] }}'
+  when: advertise_interface is not defined
+
+- name: retrieves and launches 'registrator' image
+  vars:
+    host_ip: '{{advertise_addr}}'
+  docker_container:
+    api_version: '{{ docker_api_version }}'
+    image: "gliderlabs/registrator:master"
+    volumes:
+      - '/etc/tarantool-cloud/tls:/tls:ro'
+      - '/var/run/docker.sock:/tmp/docker.sock'
+    env:
+      CONSUL_CACERT: /tls/ca.pem
+      CONSUL_TLSCERT: /tls/client-cert.pem
+      CONSUL_TLSKEY: /tls/client-key.pem
+      CONSUL_HTTP_TOKEN: "{{consul_acl_token}}"
+    command: >-
+      '-ip={{host_ip}}'
+      'consul://127.0.0.1:8500'
+    network_mode: host
+    name: registrator
+    state: started
+    pull: true
+    restart_policy: always
+    restart_retries: 3
