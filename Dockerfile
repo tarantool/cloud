@@ -1,5 +1,7 @@
 FROM alpine:3.4
 
+ENV PYTHONUNBUFFERED=1
+
 RUN set -x \
     && apk add --no-cache --virtual .run-deps \
         python3 \

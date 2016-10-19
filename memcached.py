@@ -86,7 +86,7 @@ class Memcached(group.Group):
             memc.create_containers()
             Sense.update()
 
-            create_task.log("Enabled replication")
+            create_task.log("Enabling replication")
             memc.enable_replication()
 
             create_task.log("Completed creating group")
@@ -274,16 +274,24 @@ class Memcached(group.Group):
             cmd = "tarantool_set_config.lua TARANTOOL_REPLICATION_SOURCE " + \
                   ",".join(other_addrs)
 
-            exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
-                                             cmd)
-            stream = docker_obj.exec_start(exec_id, stream=True)
+            attempts = 0
+            while attempts < 5:
+                exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
+                                                 cmd)
+                stream = docker_obj.exec_start(exec_id, stream=True)
 
-            for line in stream:
-                logging.info("Exec: %s", str(line))
+                for line in stream:
+                    logging.info("Exec: %s", str(line))
 
-            ret = docker_obj.exec_inspect(exec_id)
+                ret = docker_obj.exec_inspect(exec_id)
 
-            if ret['ExitCode'] != 0:
+                if ret['ExitCode'] == 0:
+                    break
+
+                time.sleep(1)
+                attempts+=1
+
+            if attempts >= 5:
                 raise RuntimeError("Failed to enable replication for group " +
                                    self.group_id)
 
