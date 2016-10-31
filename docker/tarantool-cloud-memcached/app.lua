@@ -9,6 +9,19 @@ local fiber = require('fiber')
 local yaml = require('yaml')
 local fio = require('fio')
 local errno = require('errno')
+local os = require('os')
+local AUTH_FILE_PATH = '/opt/tarantool/auth.sasldb'
+
+local memcached_password = os.getenv('MEMCACHED_PASSWORD') or nil
+local auth_file_exists = fio.stat(AUTH_FILE_PATH) ~= nil
+
+if memcached_password ~= nil and not auth_file_exists then
+    local cmd = "echo '" .. memcached_password .. "' |" ..
+        "saslpasswd2 -p -c -a tarantool-memcached memcached"
+
+    os.execute(cmd)
+    auth_file_exists = true
+end
 
 box.cfg {
     wal_mode = 'write';
@@ -63,7 +76,13 @@ function collect_stats()
 end
 
 -- start memcached instance
-memcached.create('instance', '0.0.0.0:' .. tostring(EXPOSED_PORT))
+if auth_file_exists then
+    memcached.create('instance', '0.0.0.0:' .. tostring(EXPOSED_PORT),
+                     {sasl = true})
+else
+    memcached.create('instance', '0.0.0.0:' .. tostring(EXPOSED_PORT))
+end
+
 
 fiber.create(collect_stats)
 

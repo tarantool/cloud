@@ -1,43 +1,33 @@
 version: '2'
 services:
   # Instances to run cloud containers
-  docker1:
-    image: docker:dind
-    privileged: true
-
   consul1:
     image: consul
-    links:
-      - docker1
     ports:
       - "8500:8500"
     tmpfs: /tmp/consul
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       CONSUL_LOCAL_CONFIG: |
         {
           "services": [{
             "name": "docker",
-            "address": "docker1",
-            "port": 2375,
-            "tags": ["lb_group=primary"],
-            "checks": [
-              {
-                "http": "http://docker1:2375/_ping",
-                "interval": "5s"
-              }
-            ]
+            "address": "unix://var/run/docker.sock",
+            "tags": ["lb_group=primary"]
           }]
         }
-      DOCKER_HOST: tcp://docker1:2375
-    command: agent -server -bootstrap-expect=1 -ui -client 0.0.0.0
+      DOCKER_HOST: unix:///var/run/docker.sock
+    command: gosu root consul agent -data-dir=/consul/data -config-dir=/consul/config -bind=0.0.0.0 -server -bootstrap-expect=1 -ui -client 0.0.0.0
 
   api:
     build: .
     links:
       - consul1
-      - docker1
     ports:
       - "5061:5061"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       CONSUL_HOST: "consul1"
       LISTEN_PORT: 5061
