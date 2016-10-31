@@ -91,7 +91,6 @@ class Memcached(group.Group):
 
             create_task.log("Completed creating group")
 
-
             create_task.set_status(task.STATUS_SUCCESS)
         except Exception as ex:
             logging.exception("Failed to create group '%s'", group_id)
@@ -159,6 +158,7 @@ class Memcached(group.Group):
             if docker_image_name:
                 self.upgrade(update_task)
 
+            Sense.update()
             update_task.set_status(task.STATUS_SUCCESS)
         except Exception as ex:
             logging.exception("Failed to update group '%s'", self.group_id)
@@ -322,7 +322,7 @@ class Memcached(group.Group):
             'shell': "/bin/sh",
             'script': "/var/lib/mon.d/tarantool_replication.sh",
             'interval': "%ds" % check_period,
-            'status' : 'warning'
+            'status': 'warning'
         }
 
         memory_check = {
@@ -330,7 +330,7 @@ class Memcached(group.Group):
             'shell': "/bin/sh",
             'script': "/var/lib/mon.d/tarantool_memory.sh",
             'interval': "%ds" % check_period,
-            'status' : 'warning'
+            'status': 'warning'
         }
 
         logging.info("Registering instance '%s' on '%s'",
@@ -380,6 +380,7 @@ class Memcached(group.Group):
                 check_id = instance_id + '_memory'
                 logging.info("Unregistering check '%s'", check_id)
                 consul_obj.agent.check.deregister(check_id)
+                consul_obj.agent.check.deregister('service:'+instance_id)
 
                 logging.info("Unregistering instance '%s' from '%s'",
                              instance_id,

@@ -139,9 +139,10 @@ def ps_command(host, is_quiet, auth):
                 'name': group['name'],
                 'type': group['type'],
                 'memsize': str(group['memsize']),
+                'mem_used': "{0:.3f}".format(instance['mem_used']),
                 'state': group['state']['name'],
                 'addr': instance['addr'],
-                'host': instance['host']
+                'host': instance['host'],
             })
 
     header = [
@@ -150,6 +151,7 @@ def ps_command(host, is_quiet, auth):
         ('name', 'NAME'),
         ('type', 'TYPE'),
         ('memsize', 'SIZE'),
+        ('mem_used', 'USED'),
         ('state', 'STATE'),
         ('addr', 'ADDRESS'),
         ('host', 'NODE')

@@ -44,14 +44,17 @@ class Sense(object):
 
         containers = {}
         docker_info = {}
+
         for entry in services.get('docker', []):
             statuses = [check['Status'] for check in entry['Checks']]
 
             if all([s == 'passing' for s in statuses]):
                 addr = entry['Service']['Address'] or entry['Node']['Address']
                 port = entry['Service']['Port']
+                if port:
+                    addr = addr + ':' + str(port)
 
-                docker_obj = docker.Client(base_url=addr+':'+str(port),
+                docker_obj = docker.Client(base_url=addr,
                                            tls=global_env.docker_tls_config)
                 containers[entry['Node']['Address']] = \
                     docker_obj.containers(all=True)
@@ -254,7 +257,10 @@ class Sense(object):
                 cpus = info['NCPU']
                 memory = float(info['MemTotal']) / (1024**3)
 
-            result.append({'addr': service_addr+':'+str(port),
+            addr = service_addr
+            if port:
+                addr += ':' + str(port)
+            result.append({'addr': addr,
                            'consul_host': consul_host,
                            'status': status,
                            'cpus': cpus,

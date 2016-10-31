@@ -72,13 +72,15 @@ def instance_to_dict(instance_id):
     name = instance_num
     instance_id = group_id + '_' + instance_num
     state = services['instances'][instance_num]['status']
+    mem_used = services['instances'][instance_num]['mem_used']
 
     return {'id': instance_id,
             'name': name,
             'addr': addr,
             'type': type_str,
             'host': host,
-            'state': state_to_dict(state)}
+            'state': state_to_dict(state),
+            'mem_used': mem_used}
 
 
 def group_to_dict(group_id):
@@ -103,6 +105,7 @@ def group_to_dict(group_id):
         name = instance_num
         instance_id = group_id + '_' + instance_num
         instance_state = services['instances'][instance_num]['status']
+        mem_used = services['instances'][instance_num]['mem_used']
 
         image_name = None
         image_id = None
@@ -117,8 +120,8 @@ def group_to_dict(group_id):
                           'host': host,
                           'state': state_to_dict(instance_state),
                           'docker_image_name': image_name,
-                          'docker_image_id': image_id})
-
+                          'docker_image_id': image_id,
+                          'mem_used': mem_used})
 
     result = {'name': blueprint['name'],
               'id': group_id,
@@ -137,6 +140,8 @@ class Group(Resource):
         return group_to_dict(group_id)
 
     def delete(self, group_id):
+        abort_if_group_doesnt_exist(group_id)
+
         parser = reqparse.RequestParser()
         parser.add_argument('async', type=bool, default=False)
         args = parser.parse_args()
