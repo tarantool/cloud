@@ -172,6 +172,7 @@ class Group(Resource):
         parser.add_argument('name')
         parser.add_argument('memsize', type=float)
         parser.add_argument('async', type=bool, default=False)
+        parser.add_argument('password', type=str)
         parser.add_argument('docker_image_name')
 
         args = parser.parse_args()
@@ -182,6 +183,7 @@ class Group(Resource):
         gevent.spawn(memc.update,
                      args['name'],
                      args['memsize'],
+                     args['password'],
                      args['docker_image_name'],
                      update_task)
 
@@ -208,6 +210,7 @@ class GroupList(Resource):
         parser = reqparse.RequestParser()
         parser.add_argument('name', required=True)
         parser.add_argument('memsize', type=float, default=0.5)
+        parser.add_argument('password', type=str, default=None)
         parser.add_argument('async', type=bool, default=False)
 
         logging.info("Creating instance")
@@ -221,6 +224,7 @@ class GroupList(Resource):
                      create_task,
                      args['name'],
                      args['memsize'],
+                     args['password'],
                      10)
 
         if args['async']:

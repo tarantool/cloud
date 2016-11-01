@@ -192,10 +192,13 @@ def inspect_command(host, group_id_list, auth):
     print(json.dumps(result, indent=2))
 
 
-def run_command(host, name, memsize, auth, verbose):
+def run_command(host, name, memsize, password, auth, verbose):
     args = {'name': name,
             'memsize': memsize,
             'async': True}
+
+    if password:
+        args['password'] = password
 
     url = 'http://%s/api/groups' % without_http_prefix(host)
 
@@ -294,12 +297,14 @@ def rm_command(host, group_id_list, auth, verbose):
         print('')
 
 
-def update_command(host, group_id, name, memsize, auth, verbose):
+def update_command(host, group_id, name, memsize, password, auth, verbose):
     data = {'async': True}
     if name:
         data['name'] = name
     if memsize:
         data['memsize'] = memsize
+    if password:
+        data['password'] = password
 
     url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
 
@@ -334,6 +339,7 @@ def update_command(host, group_id, name, memsize, auth, verbose):
         data = json.loads(data_str)
         index = data['index']
         status = data['status']
+
         for log in data['logs']:
             if verbose:
                 print(log['message'])
@@ -449,6 +455,9 @@ def main():
         help='amount of memory to allocate, in GiB (default is 0.5)',
         nargs='?',
         default=0.5)
+    run_parser.add_argument(
+        '--password',
+        help='password for accessing this group via memcached protocol')
 
     rm_parser = subparsers.add_parser(
         'rm', help='remove one or more groups')
@@ -466,6 +475,10 @@ def main():
     update_parser.add_argument('--name',
                                help='name to set',
                                default=None)
+    update_parser.add_argument(
+        '--password',
+        help='password for accessing this group via memcached protocol')
+
     update_parser.add_argument('group_id',
                                help='group ID to update')
 
@@ -494,12 +507,13 @@ def main():
     if args.subparser_name == 'inspect':
         inspect_command(host, args.group_id, auth)
     elif args.subparser_name == 'run':
-        run_command(host, args.name, args.memsize, auth, args.verbose)
+        run_command(host, args.name, args.memsize, args.password,
+                    auth, args.verbose)
     elif args.subparser_name == 'rm':
         rm_command(host, args.group_id, auth, args.verbose)
     elif args.subparser_name == 'update':
         update_command(host, args.group_id, args.name,
-                       args.memsize, auth, args.verbose)
+                       args.memsize, args.password, auth, args.verbose)
     elif args.subparser_name == 'upgrade':
         upgrade_command(host, args.group_id, auth, args.verbose)
 

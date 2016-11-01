@@ -47,7 +47,7 @@ class Memcached(group.Group):
         return memc
 
     @classmethod
-    def create(cls, create_task, name, memsize, check_period):
+    def create(cls, create_task, name, memsize, password, check_period):
         group_id = create_task.group_id
 
         try:
@@ -83,7 +83,7 @@ class Memcached(group.Group):
             Sense.update()
 
             create_task.log("Creating containers")
-            memc.create_containers()
+            memc.create_containers(password)
             Sense.update()
 
             create_task.log("Enabling replication")
@@ -146,14 +146,17 @@ class Memcached(group.Group):
 
             raise
 
-
-    def update(self, name, memsize, docker_image_name, update_task):
+    def update(self, name, memsize, password,
+               docker_image_name, update_task):
         try:
             if name and name != self.blueprint['name']:
                 self.rename(name, update_task)
 
             if memsize and memsize != self.blueprint['memsize']:
                 self.resize(memsize, update_task)
+
+            if password:
+                self.set_password(password, update_task)
 
             if docker_image_name:
                 self.upgrade(update_task)
@@ -177,7 +180,6 @@ class Memcached(group.Group):
 
         kv.put('tarantool/%s/blueprint/name' % self.group_id, name)
 
-
     def resize(self, memsize, update_task):
         consul_obj = consul.Consul(host=global_env.consul_host,
                                    token=global_env.consul_acl_token)
@@ -190,6 +192,13 @@ class Memcached(group.Group):
 
         kv.put('tarantool/%s/blueprint/memsize' % self.group_id, str(memsize))
         update_task.log("Completed resizing")
+
+    def set_password(self, password, update_task):
+        update_task.log("Setting password for instance 1")
+        self.set_instance_password("1", password)
+        update_task.log("Setting password for instance 2")
+        self.set_instance_password("2", password)
+
 
     def allocate(self):
         consul_obj = consul.Consul(host=global_env.consul_host,
@@ -224,9 +233,9 @@ class Memcached(group.Group):
         self.unregister_instance("1")
         self.unregister_instance("2")
 
-    def create_containers(self):
-        self.create_container("1")
-        self.create_container("2")
+    def create_containers(self, password):
+        self.create_container("1", password)
+        self.create_container("2", password)
 
     def remove_containers(self):
         self.remove_container("1")
@@ -392,7 +401,7 @@ class Memcached(group.Group):
                          instance_id)
 
 
-    def create_container(self, instance_num):
+    def create_container(self, instance_num, password):
         blueprint = self.blueprint
         allocation = self.allocation
 
@@ -462,6 +471,9 @@ class Memcached(group.Group):
         environment = {}
 
         environment['TARANTOOL_SLAB_ALLOC_ARENA'] = memsize
+
+        if password:
+            environment['MEMCACHED_PASSWORD'] = password
 
         if replica_ip:
             environment['TARANTOOL_REPLICATION_SOURCE'] = replica_ip + ':3301'
@@ -660,6 +672,50 @@ class Memcached(group.Group):
             docker_obj.restart(container=instance_id)
         else:
             logging.info("Not resizing container '%s', as it doesn't exist",
+                         instance_id)
+
+    def set_instance_password(self, instance_num, password):
+        containers = self.containers
+
+        if instance_num not in containers['instances']:
+            return
+
+        instance_id = self.group_id + '_' + instance_num
+        docker_hosts = [h['addr'].split(':')[0] for h in Sense.docker_hosts()
+                        if h['status'] == 'passing']
+
+        if containers:
+            docker_host = containers['instances'][instance_num]['host']
+            docker_hosts = Sense.docker_hosts()
+
+            docker_addr = None
+            for host in docker_hosts:
+                if host['addr'].split(':')[0] == docker_host or \
+                   host['consul_host'] == docker_host:
+                    docker_addr = host['addr']
+            if not docker_addr:
+                raise RuntimeError("No such Docker host: '%s'" % docker_host)
+
+            logging.info("Setting password for '%s' on '%s'",
+                         instance_id,
+                         docker_host)
+
+            docker_obj = docker.Client(base_url=docker_addr,
+                                       tls=global_env.docker_tls_config)
+
+            cmd = "memcached_set_password.lua " + password
+
+            exec_id = docker_obj.exec_create(self.group_id + '_' +
+                                             instance_num, cmd)
+            docker_obj.exec_start(exec_id)
+            ret = docker_obj.exec_inspect(exec_id)
+
+            if ret['ExitCode'] != 0:
+                raise RuntimeError("Failed to set password for container " +
+                                   instance_id)
+
+        else:
+            logging.info("Not setting password for '%s', as it doesn't exist",
                          instance_id)
 
 
