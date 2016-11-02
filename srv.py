@@ -9,6 +9,7 @@ import sys
 import uuid
 import ipaddress
 import memcached
+import tarantino
 import sense
 import global_env
 import logging
@@ -17,6 +18,8 @@ import docker
 import argparse
 import yaml
 import ip_pool
+
+import werkzeug
 
 from gevent.wsgi import WSGIServer
 import flask
@@ -146,7 +149,6 @@ class Group(Resource):
         parser.add_argument('async', type=bool, default=False)
         args = parser.parse_args()
 
-        print("Is async: ", args['async'])
         abort_if_group_doesnt_exist(group_id)
 
         delete_task = memcached.DeleteTask(group_id)
@@ -165,7 +167,6 @@ class Group(Resource):
 
     def put(self, group_id):
         abort_if_group_doesnt_exist(group_id)
-        memc = memcached.Memcached.get(group_id)
 
         parser = reqparse.RequestParser()
         parser = reqparse.RequestParser()
@@ -174,18 +175,48 @@ class Group(Resource):
         parser.add_argument('async', type=bool, default=False)
         parser.add_argument('password', type=str)
         parser.add_argument('docker_image_name')
+        parser.add_argument('config',
+                            type=werkzeug.datastructures.FileStorage,
+                            location='files')
 
         args = parser.parse_args()
 
-        update_task = memcached.UpdateTask(group_id)
-        TASKS[update_task.task_id] = update_task
+        blueprints = sense.Sense.blueprints()
+        group = blueprints[group_id]
 
-        gevent.spawn(memc.update,
-                     args['name'],
-                     args['memsize'],
-                     args['password'],
-                     args['docker_image_name'],
-                     update_task)
+        if group['type'] == 'memcached':
+            memc = memcached.Memcached.get(group_id)
+
+            update_task = memcached.UpdateTask(group_id)
+            TASKS[update_task.task_id] = update_task
+
+            gevent.spawn(memc.update,
+                         args['name'],
+                         args['memsize'],
+                         args['password'],
+                         args['docker_image_name'],
+                         update_task)
+
+        elif group['type'] == 'tarantino':
+            tar = tarantino.Tarantino.get(group_id)
+
+            update_task = tarantino.UpdateTask(group_id)
+            TASKS[update_task.task_id] = update_task
+
+            config_data = None
+            if args['config']:
+                stream = args['config'].stream
+                config_data = stream.getvalue().decode(encoding='UTF-8')
+
+            gevent.spawn(tar.update,
+                         args['name'],
+                         args['memsize'],
+                         args['password'],
+                         config_data,
+                         args['docker_image_name'],
+                         update_task)
+        else:
+            raise RuntimeError("Unknown group type: %s" % group['type'])
 
         if args['async']:
             result = {'id': update_task.group_id,
@@ -208,6 +239,7 @@ class GroupList(Resource):
 
     def post(self):
         parser = reqparse.RequestParser()
+        parser.add_argument('type', required=True)
         parser.add_argument('name', required=True)
         parser.add_argument('memsize', type=float, default=0.5)
         parser.add_argument('password', type=str, default=None)
@@ -220,12 +252,22 @@ class GroupList(Resource):
         create_task = memcached.CreateTask(group_id)
         TASKS[create_task.task_id] = create_task
 
-        gevent.spawn(memcached.Memcached.create,
-                     create_task,
-                     args['name'],
-                     args['memsize'],
-                     args['password'],
-                     10)
+        if args['type'] == 'memcached':
+            gevent.spawn(memcached.Memcached.create,
+                         create_task,
+                         args['name'],
+                         args['memsize'],
+                         args['password'],
+                         10)
+        elif args['type'] == 'tarantino':
+            gevent.spawn(tarantino.Tarantino.create,
+                         create_task,
+                         args['name'],
+                         args['memsize'],
+                         args['password'],
+                         10)
+        else:
+            raise RuntimeError('No such instance type: %s' % args['type'])
 
         if args['async']:
             result = {'id': create_task.group_id,

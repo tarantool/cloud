@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 from __future__ import print_function
 
+import mimetypes
+import random
+import string
 import argparse
 import json
 import logging
@@ -14,6 +17,77 @@ import collections
 
 
 GROUP_KEY_ORDER = ["id", "creation_time", "name", "type", "memsize"]
+
+_BOUNDARY_CHARS = string.digits + string.ascii_letters
+
+def encode_multipart(fields, files, boundary=None):
+    r"""Encode dict of form fields and dict of files as multipart/form-data.
+    Return tuple of (body_string, headers_dict). Each value in files is a dict
+    with required keys 'filename' and 'content', and optional 'mimetype' (if
+    not specified, tries to guess mime type or uses 'application/octet-stream').
+
+    >>> body, headers = encode_multipart({'FIELD': 'VALUE'},
+    ...                                  {'FILE': {'filename': 'F.TXT', 'content': 'CONTENT'}},
+    ...                                  boundary='BOUNDARY')
+    >>> print('\n'.join(repr(l) for l in body.split('\r\n')))
+    '--BOUNDARY'
+    'Content-Disposition: form-data; name="FIELD"'
+    ''
+    'VALUE'
+    '--BOUNDARY'
+    'Content-Disposition: form-data; name="FILE"; filename="F.TXT"'
+    'Content-Type: text/plain'
+    ''
+    'CONTENT'
+    '--BOUNDARY--'
+    ''
+    >>> print(sorted(headers.items()))
+    [('Content-Length', '193'), ('Content-Type', 'multipart/form-data; boundary=BOUNDARY')]
+    >>> len(body)
+    193
+    """
+    def escape_quote(s):
+        return s.replace('"', '\\"')
+
+    if boundary is None:
+        boundary = ''.join(random.choice(_BOUNDARY_CHARS) for i in range(30))
+    lines = []
+
+    for name, value in fields.items():
+        lines.extend((
+            '--{0}'.format(boundary),
+            'Content-Disposition: form-data; name="{0}"'.format(escape_quote(name)),
+            '',
+            str(value),
+        ))
+
+    for name, value in files.items():
+        filename = value['filename']
+        if 'mimetype' in value:
+            mimetype = value['mimetype']
+        else:
+            mimetype = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+        lines.extend((
+            '--{0}'.format(boundary),
+            'Content-Disposition: form-data; name="{0}"; filename="{1}"'.format(
+                    escape_quote(name), escape_quote(filename)),
+            'Content-Type: {0}'.format(mimetype),
+            '',
+            value['content'],
+        ))
+
+    lines.extend((
+        '--{0}--'.format(boundary),
+        '',
+    ))
+    body = '\r\n'.join(lines)
+
+    headers = {
+        'Content-Type': 'multipart/form-data; boundary={0}'.format(boundary),
+        'Content-Length': str(len(body)),
+    }
+
+    return (body, headers)
 
 def print_table(header, data):
     lengths = [0] * len(header)
@@ -73,15 +147,20 @@ def http_post(url, data, auth=None):
 
     return response.getcode(), response_text
 
-def http_put(url, data, auth=None):
-    data_str = json.dumps(data)
-    data_len = len(data_str)
+def http_put(url, data, files=None, auth=None):
+    if files:
+        data, headers = encode_multipart(data, files)
+    else:
+        data = json.dumps(data)
+        data_len = len(data)
+        headers = {'Content-Type': 'application/json',
+                   'Content-Length': data_len}
 
     request = urllib2.Request(
         url,
-        data_str,
-        {'Content-Type': 'application/json',
-         'Content-Length': data_len})
+        data,
+        headers
+        )
     request.get_method = lambda: 'PUT'
 
     if auth:
@@ -192,8 +271,10 @@ def inspect_command(host, group_id_list, auth):
     print(json.dumps(result, indent=2))
 
 
-def run_command(host, name, memsize, password, auth, verbose):
-    args = {'name': name,
+def run_command(host, instance_type,
+                name, memsize, password, auth, verbose):
+    args = {'type': instance_type,
+            'name': name,
             'memsize': memsize,
             'async': True}
 
@@ -297,19 +378,25 @@ def rm_command(host, group_id_list, auth, verbose):
         print('')
 
 
-def update_command(host, group_id, name, memsize, password, auth, verbose):
+def update_command(host, group_id, name, memsize, password, config,
+                   auth, verbose):
     data = {'async': True}
+    files = None
     if name:
         data['name'] = name
     if memsize:
         data['memsize'] = memsize
     if password:
         data['password'] = password
+    if config:
+        config_data = open(config).read()
+        files = {'config': {'filename': os.path.basename(config),
+                            'content': config_data}}
 
     url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
 
     try:
-        _, data_str = http_put(url, data, auth)
+        _, data_str = http_put(url, data, files=files, auth=auth)
     except urllib2.HTTPError, err:
         if err.code == 404:
             print("No such group: '%s'" % group_id)
@@ -361,7 +448,7 @@ def upgrade_command(host, group_id, auth, verbose):
     url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
 
     try:
-        _, data_str = http_put(url, data, auth)
+        _, data_str = http_put(url, data, auth=auth)
     except urllib2.HTTPError, err:
         if err.code == 404:
             print("No such group: '%s'" % group_id)
@@ -450,7 +537,7 @@ def main():
         '--name',
         help='name of the new group')
     run_parser.add_argument(
-        'memsize',
+        '--memsize',
         type=float,
         help='amount of memory to allocate, in GiB (default is 0.5)',
         nargs='?',
@@ -458,6 +545,10 @@ def main():
     run_parser.add_argument(
         '--password',
         help='password for accessing this group via memcached protocol')
+    run_parser.add_argument(
+        'type',
+        help='instance type to run (default is memcached)',
+        default='memcached', nargs='?')
 
     rm_parser = subparsers.add_parser(
         'rm', help='remove one or more groups')
@@ -475,6 +566,10 @@ def main():
     update_parser.add_argument('--name',
                                help='name to set',
                                default=None)
+    update_parser.add_argument('--config',
+                               help='configuration file to update',
+                               default=None)
+
     update_parser.add_argument(
         '--password',
         help='password for accessing this group via memcached protocol')
@@ -507,13 +602,15 @@ def main():
     if args.subparser_name == 'inspect':
         inspect_command(host, args.group_id, auth)
     elif args.subparser_name == 'run':
-        run_command(host, args.name, args.memsize, args.password,
+        run_command(host, args.type,
+                    args.name, args.memsize, args.password,
                     auth, args.verbose)
     elif args.subparser_name == 'rm':
         rm_command(host, args.group_id, auth, args.verbose)
     elif args.subparser_name == 'update':
         update_command(host, args.group_id, args.name,
-                       args.memsize, args.password, auth, args.verbose)
+                       args.memsize, args.password, args.config,
+                       auth, args.verbose)
     elif args.subparser_name == 'upgrade':
         upgrade_command(host, args.group_id, auth, args.verbose)
 
