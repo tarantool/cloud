@@ -75,11 +75,13 @@ def instance_to_dict(instance_id):
     name = instance_num
     instance_id = group_id + '_' + instance_num
     state = services['instances'][instance_num]['status']
+    port = services['instances'][instance_num]['port']
     mem_used = services['instances'][instance_num]['mem_used']
 
     return {'id': instance_id,
             'name': name,
             'addr': addr,
+            'port': port,
             'type': type_str,
             'host': host,
             'state': state_to_dict(state),
@@ -108,6 +110,7 @@ def group_to_dict(group_id):
         name = instance_num
         instance_id = group_id + '_' + instance_num
         instance_state = services['instances'][instance_num]['status']
+        port = services['instances'][instance_num]['port']
         mem_used = services['instances'][instance_num]['mem_used']
 
         image_name = None
@@ -119,6 +122,7 @@ def group_to_dict(group_id):
         instances.append({'id': instance_id,
                           'name': name,
                           'addr': addr,
+                          'port': port,
                           'type': type_str,
                           'host': host,
                           'state': state_to_dict(instance_state),

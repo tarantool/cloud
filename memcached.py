@@ -349,7 +349,7 @@ class Memcached(group.Group):
         ret = consul_obj.agent.service.register("memcached",
                                                 service_id=instance_id,
                                                 address=addr,
-                                                port=3301,
+                                                port=11211,
                                                 check=replication_check,
                                                 tags=['tarantool'])
 

@@ -221,6 +221,7 @@ def ps_command(host, is_quiet, auth):
                 'mem_used': "{0:.3f}".format(instance['mem_used']),
                 'state': group['state']['name'],
                 'addr': instance['addr'],
+                'port': str(instance['port']),
                 'host': instance['host'],
             })
 
@@ -233,6 +234,7 @@ def ps_command(host, is_quiet, auth):
         ('mem_used', 'USED'),
         ('state', 'STATE'),
         ('addr', 'ADDRESS'),
+        ('port', 'PORT'),
         ('host', 'NODE')
     ]
 

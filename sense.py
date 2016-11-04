@@ -194,6 +194,7 @@ class Sense(object):
 
                 groups[group]['instances'][instance_id] = {
                     'addr': addr,
+                    'port': port,
                     'status': status,
                     'host': node,
                     'mem_used': mem}
