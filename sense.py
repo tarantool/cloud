@@ -248,6 +248,7 @@ class Sense(object):
             status = combine_consul_statuses(statuses)
 
             service_addr = entry['Service']['Address'] or entry['Node']['Address']
+            tags = entry['Service']['Tags'] or []
             port = entry['Service']['Port']
             consul_host = entry['Node']['Address']
             cpus = None
@@ -262,6 +263,7 @@ class Sense(object):
             if port:
                 addr += ':' + str(port)
             result.append({'addr': addr,
+                           'tags': tags,
                            'consul_host': consul_host,
                            'status': status,
                            'cpus': cpus,

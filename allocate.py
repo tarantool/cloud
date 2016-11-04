@@ -5,7 +5,8 @@ from sense import Sense
 
 def allocate(memory, anti_affinity = []):
     docker_hosts = [h for h in Sense.docker_hosts()
-                    if h['status'] == 'passing']
+                    if (h['status'] == 'passing' and
+                        'im' in h['tags'])]
 
     if not docker_hosts:
         raise RuntimeError("There are no healthy docker nodes")
