@@ -86,7 +86,7 @@
     image: 'consul'
     volumes:
       - '/var/consul:/consul/data'
-      - '/etc/consul:/consul/config:ro'
+      - '/etc/consul:/consul/config'
       - '/etc/tarantool-cloud/tls:/consul/tls:ro'
       - '/etc/tarantool-cloud/tls/client-cert.pem:/docker/tls/cert.pem'
       - '/etc/tarantool-cloud/tls/client-key.pem:/docker/tls/key.pem'
