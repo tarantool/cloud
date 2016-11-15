@@ -99,3 +99,7 @@ curl -X POST -F 'name=myinstance' -F 'memsize=0.2' localhost:5061/api/groups
 ```
 
 This will create an instance named `myinstance`, with 0.2 GiB memory limit.
+
+## License
+
+BSD (see LICENSE file)
