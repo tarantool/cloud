@@ -106,6 +106,17 @@ def check_output(*popenargs, **kwargs):
     return output
 
 
+def is_openssl_functioning():
+    cmd = 'openssl version'
+    try:
+        check_output(shlex.split(cmd))
+        return True
+    except subprocess.CalledProcessError:
+        return False
+    except OSError:
+        return False
+
+
 def is_key_encrypted(key):
     """Returns true if the private key is password-protected"""
     for line in key:
@@ -477,6 +488,11 @@ def main():
     password = args.password
 
     try:
+        if not is_openssl_functioning():
+            print("Error: The 'openssl' binary is not functioning correctly.")
+            print("       Call 'openssl version' to see what's wrong.")
+            sys.exit(1)
+
         if args.subparser_name == 'ca':
             keypath = os.path.join(basedir, 'ca.key')
             certpath = os.path.join(basedir, 'ca.crt')
