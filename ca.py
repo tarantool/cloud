@@ -442,7 +442,8 @@ def main():
     parser.add_argument('-d', '--dir',
                         help='directory to store certificates (default is .)')
 
-    subparsers = parser.add_subparsers(title="commands", dest="subparser_name")
+    subparsers = parser.add_subparsers(title="commands", dest="command")
+    subparsers.required = True
 
     # CA parser
     ca_parser = subparsers.add_parser('ca', help='generate CA certificate')
@@ -485,6 +486,11 @@ def main():
     args = parser.parse_args()
 
     basedir = os.getcwd() if args.dir is None else args.dir
+
+    if not os.path.isdir(basedir):
+        print("Error: directory doesn't exist: '%s'" % basedir)
+        sys.exit(1)
+
     password = args.password
 
     try:
@@ -493,7 +499,7 @@ def main():
             print("       Call 'openssl version' to see what's wrong.")
             sys.exit(1)
 
-        if args.subparser_name == 'ca':
+        if args.command == 'ca':
             keypath = os.path.join(basedir, 'ca.key')
             certpath = os.path.join(basedir, 'ca.crt')
             common_name = args.common_name
@@ -513,7 +519,7 @@ def main():
                                                   common_name)
                 write_file(certpath, ca_cert)
 
-        elif args.subparser_name == 'client':
+        elif args.command == 'client':
             keypath = os.path.join(basedir, 'client.key')
             certpath = os.path.join(basedir, 'client.crt')
             ca_keypath = os.path.join(basedir, 'ca.key')
@@ -552,7 +558,7 @@ def main():
             if args.cert:
                 print(client_cert)
 
-        elif args.subparser_name == 'server':
+        elif args.command == 'server':
             fqdn = args.fqdn
             altnames = args.altname
 
