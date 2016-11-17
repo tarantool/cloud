@@ -1,3 +1,4 @@
+.kitchen
 *.pyc
 *.xlog
 *.snap

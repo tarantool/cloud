@@ -1,0 +1,22 @@
+FORGE
+  remote: https://forgeapi.puppetlabs.com
+  specs:
+    KyleAnderson-consul (1.1.0)
+      puppet-archive (< 2.0.0, >= 1.0.0)
+      puppetlabs-stdlib (< 5.0.0, >= 4.6.0)
+    garethr-docker (5.3.0)
+      puppetlabs-apt (<= 3.0.0, >= 1.8.0)
+      puppetlabs-stdlib (>= 4.1.0)
+      stahnma-epel (>= 0.0.6)
+    puppet-archive (1.1.2)
+      puppetlabs-stdlib (< 5.0.0, >= 4.2.0)
+    puppetlabs-apt (2.3.0)
+      puppetlabs-stdlib (< 5.0.0, >= 4.5.0)
+    puppetlabs-stdlib (4.13.1)
+    stahnma-epel (1.2.2)
+      puppetlabs-stdlib (>= 3.0.0)
+
+DEPENDENCIES
+  KyleAnderson-consul (>= 0)
+  garethr-docker (>= 0)
+

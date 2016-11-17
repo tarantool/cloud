@@ -1,0 +1,28 @@
+{
+    "name": "tarantool-cloud",
+    "version": "0.0.1",
+    "author": "Konstantin Nazarov <mail@kn.am>",
+    "license": "BSD",
+    "summary": "A module that installs and configures Tarantool Cloud",
+    "project_page": "https://github.com/tarantool/cloud",
+    "source": "https://github.com/tarantool/cloud",
+    "issues_url": "https://github.com/tarantool/cloud/issues",
+    "tags": [],
+    "operatingsystem_support": [
+        {
+            "operatingsystem":"RedHat",
+            "operatingsystemrelease":[ "7.0" ]
+        },
+        {
+            "operatingsystem": "Ubuntu",
+            "operatingsystemrelease": [ "14.04", "16.04" ]
+        }
+    ],
+    "dependencies": [
+        { "name": "puppetlabs/stdlib" },
+        { "name": "puppetlabs/firewall" },
+        { "name": "garethr/docker" },
+        { "name": "KyleAnderson/consul" }
+    ],
+    "data_provider": "hiera"
+}
