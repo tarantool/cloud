@@ -453,6 +453,12 @@ def main():
     ca_parser.add_argument('common_name',
                            help='TLS common name (default is tarantool_cloud)',
                            default='tarantool_cloud', nargs='?')
+    ca_parser.add_argument('-k', '--key',
+                           action='store_true',
+                           help='print generated key')
+    ca_parser.add_argument('-c', '--cert',
+                           action='store_true',
+                           help='print generated cert')
 
     # Client parser
     client_parser = subparsers.add_parser('client',
@@ -518,6 +524,13 @@ def main():
                 ca_cert = generate_ca_certificate(ca_key, password,
                                                   common_name)
                 write_file(certpath, ca_cert)
+            else:
+                ca_cert = read_file(certpath)
+
+            if args.key:
+                print(ca_key)
+            if args.cert:
+                print(ca_cert)
 
         elif args.command == 'client':
             keypath = os.path.join(basedir, 'client.key')
@@ -560,7 +573,14 @@ def main():
 
         elif args.command == 'server':
             fqdn = args.fqdn
-            altnames = args.altname
+            altnames = []
+            # Puppet may pass altnames as a single argument
+            # with altnames separated by spaces. It happens because of
+            # deficiences in generate() that can't interpolate arrays.
+            # There is no harm from this workaround for general use cases,
+            # because hostnames can't contain spaces anyway.
+            for altname in args.altname:
+                altnames += altname.split(' ')
 
             if not os.path.exists(os.path.join(basedir, 'servers')):
                 os.mkdir(os.path.join(basedir, 'servers'))
