@@ -1,0 +1,4 @@
+---
+classes:
+  - roles::consul_server
+  - roles::docker

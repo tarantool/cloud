@@ -1,0 +1,7 @@
+---
+private::tarantool_cloud::consul::bootstrap_address: 172.16.20.12
+private::tarantool_cloud::consul::gossip_key: oYs5sD7tImRkZZ9vr3PkKg==
+private::tarantool_cloud::consul::acl_master_token: 0020D598-7CC6-4878-ACF2-687122881682
+private::tarantool_cloud::consul::acl_token: 24ED2EFA-E57A-41F7-9FB6-601579653C05
+private::tarantool_cloud::consul::datacenter: east-aws
+private::tarantool_cloud::consul::num_servers: 3

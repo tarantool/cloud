@@ -1,0 +1,4 @@
+classes:
+  - roles::consul_agent
+  - roles::docker
+  - roles::instance_manager
