@@ -19,4 +19,5 @@ FORGE
 DEPENDENCIES
   KyleAnderson-consul (>= 0)
   garethr-docker (>= 0)
+  puppetlabs-stdlib (>= 0)
 

@@ -4,3 +4,4 @@ forge 'https://forgeapi.puppetlabs.com'
 
 mod 'garethr/docker'
 mod 'KyleAnderson/consul'
+mod 'puppetlabs/stdlib'

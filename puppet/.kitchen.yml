@@ -4,7 +4,7 @@ driver:
   customize:
     memory: 2048
   synced_folders:
-    - ['.', '/opt/tarantool_cloud']
+    - ['../', '/opt/tarantool_cloud']
     - ['test/shared/ca', '/var/tarantool_cloud/ca']
 
 platforms:
@@ -18,11 +18,11 @@ provisioner:
   manifests_path: manifests
   modules_path: modules
   hiera_config_path: test/shared/hiera.yaml
-  hiera_data_path: test/hared/hieradata
+  hiera_data_path: test/shared/hieradata
   require_chef_for_busser: false
   require_puppet_collections: true
   puppet_apt_collections_repo: http://apt.puppetlabs.com/puppetlabs-release-pc1-xenial.deb
-  puppetfile_path: puppet/Puppetfile
+  puppetfile_path: Puppetfile
   puppet_debug: true
   puppet_verbose: true
 

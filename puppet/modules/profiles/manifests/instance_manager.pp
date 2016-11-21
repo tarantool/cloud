@@ -3,11 +3,12 @@
 # Runs tarantool cloud Instance Manager in a Docker container and
 # exposes it on port 5061.
 #
-class profiles::instance_manager {
+class profiles::instance_manager(
+  $tls_dir = '/etc/tarantool_cloud/tls',
+  $acl_token = hiera('profiles::consul::acl_token')
+) {
   include docker
 
-  $tls_dir = '/etc/tarantool_cloud/tls'
-  $acl_token = hiera('private::tarantool_cloud::consul::acl_token')
   $advertise_addr = $::external_ip
 
 
