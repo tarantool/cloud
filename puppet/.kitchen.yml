@@ -15,10 +15,10 @@ platforms:
 
 provisioner:
   name: puppet_apply
-  manifests_path: puppet/manifests
-  modules_path: puppet/modules
-  hiera_config_path: puppet/hiera.yaml
-  hiera_data_path: puppet/hieradata
+  manifests_path: manifests
+  modules_path: modules
+  hiera_config_path: test/shared/hiera.yaml
+  hiera_data_path: test/hared/hieradata
   require_chef_for_busser: false
   require_puppet_collections: true
   puppet_apt_collections_repo: http://apt.puppetlabs.com/puppetlabs-release-pc1-xenial.deb
