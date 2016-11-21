@@ -1,9 +1,14 @@
+# == Class: profiles::instance_manager
+#
+# Runs tarantool cloud Instance Manager in a Docker container and
+# exposes it on port 5061.
+#
 class profiles::instance_manager {
   include docker
 
   $tls_dir = '/etc/tarantool_cloud/tls'
   $acl_token = hiera('private::tarantool_cloud::consul::acl_token')
-  $advertise_addr = "${::external_ip}"
+  $advertise_addr = $::external_ip
 
 
   file { '/etc/im':
@@ -30,11 +35,12 @@ CONSUL_ACL_TOKEN: ${acl_token}
     image_tag => 'latest'
   }
   docker::run { 'instance_manager':
-    image   => 'tarantool/cloud',
-    volumes => ["${tls_dir}:/tls:ro",
-                "/etc/im:/im/config:ro"],
-    ports => ['5061:8080'],
+    image            => 'tarantool/cloud',
+    volumes          => [
+      "${tls_dir}:/tls:ro",
+      '/etc/im:/im/config:ro'],
+    ports            => ['5061:8080'],
     extra_parameters => [ '--restart=always' ],
-    command => "python3 /im/srv.py -c /im/config/config.yml"
+    command          => 'python3 /im/srv.py -c /im/config/config.yml'
   }
 }
