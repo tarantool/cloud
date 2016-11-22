@@ -25,51 +25,45 @@ provisioner:
   puppetfile_path: Puppetfile
   puppet_debug: true
   puppet_verbose: true
+  custom_options: "-e 'include tarantool_cloud'"
 
 suites:
   - name: node1
     driver:
       vm_hostname: node1
     provisioner:
-      manifest: default.pp
       custom_facts:
         nodename: node1
-        external_ip: 172.16.20.12
     driver:
       network:
         - ["private_network", {ip: "172.16.20.12"}]
+
   - name: node2
     driver:
       vm_hostname: node2
     provisioner:
-      manifest: default.pp
       custom_facts:
         nodename: node2
-        external_ip: 172.16.20.13
     driver:
       network:
         - ["private_network", {ip: "172.16.20.13"}]
+
   - name: node3
     driver:
       vm_hostname: node3
     provisioner:
-      manifest: default.pp
       custom_facts:
         nodename: node3
-        external_ip: 172.16.20.14
-
     driver:
       network:
         - ["private_network", {ip: "172.16.20.14"}]
+
   - name: node4
     driver:
       vm_hostname: node4
     provisioner:
-      manifest: default.pp
       custom_facts:
         nodename: node4
-        external_ip: 172.16.20.15
-
     driver:
       network:
         - ["private_network", {ip: "172.16.20.15"}]

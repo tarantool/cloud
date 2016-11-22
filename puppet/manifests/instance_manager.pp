@@ -3,14 +3,8 @@
 # Runs tarantool cloud Instance Manager in a Docker container and
 # exposes it on port 5061.
 #
-class profiles::instance_manager(
-  $tls_dir = '/etc/tarantool_cloud/tls',
-  $acl_token = hiera('profiles::consul::acl_token')
-) {
+class tarantool_cloud::instance_manager{
   include docker
-
-  $advertise_addr = $::external_ip
-
 
   file { '/etc/im':
     ensure => 'directory',
@@ -18,12 +12,12 @@ class profiles::instance_manager(
 
   $config = "
 ---
-CONSUL_HOST: ${advertise_addr}
+CONSUL_HOST: ${tarantool_cloud::advertise_addr}
 LISTEN_PORT: 8080
-DOCKER_CLIENT_KEY: /tls/client.key
-DOCKER_CLIENT_CERT: /tls/client.crt
-DOCKER_SERVER_CERT: /tls/ca.crt
-CONSUL_ACL_TOKEN: ${acl_token}
+DOCKER_CLIENT_KEY: /tls/key.pem
+DOCKER_CLIENT_CERT: /tls/cert.pem
+DOCKER_SERVER_CERT: /tls/ca.pem
+CONSUL_ACL_TOKEN: ${tarantool_cloud::acl_token}
   "
 
   file { '/etc/im/config.yml':
@@ -38,7 +32,7 @@ CONSUL_ACL_TOKEN: ${acl_token}
   docker::run { 'instance_manager':
     image            => 'tarantool/cloud',
     volumes          => [
-      "${tls_dir}:/tls:ro",
+      "${tarantool_cloud::tls_dir}:/tls:ro",
       '/etc/im:/im/config:ro'],
     ports            => ['5061:8080'],
     extra_parameters => [ '--restart=always' ],

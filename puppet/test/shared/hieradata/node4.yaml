@@ -1,4 +1,3 @@
-classes:
-  - roles::consul_agent
-  - roles::docker
-  - roles::instance_manager
+tarantool_cloud::advertise_addr: 172.16.20.15
+tarantool_cloud::agent: true
+tarantool_cloud::instance_manager: true

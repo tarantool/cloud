@@ -12,6 +12,7 @@ FORGE
       puppetlabs-stdlib (< 5.0.0, >= 4.2.0)
     puppetlabs-apt (2.3.0)
       puppetlabs-stdlib (< 5.0.0, >= 4.5.0)
+    puppetlabs-firewall (1.8.1)
     puppetlabs-stdlib (4.13.1)
     stahnma-epel (1.2.2)
       puppetlabs-stdlib (>= 3.0.0)
@@ -19,5 +20,6 @@ FORGE
 DEPENDENCIES
   KyleAnderson-consul (>= 0)
   garethr-docker (>= 0)
+  puppetlabs-firewall (>= 0)
   puppetlabs-stdlib (>= 0)
 

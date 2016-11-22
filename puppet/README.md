@@ -65,12 +65,9 @@ Instance Manager itself.
 Every node that will run database instances or the instance manager should
 also have Docker configured.
 
-There are 4 distinct roles:
-
-* `roles::consul_agent` -- sets up Consul in agent mode
-* `roles::consul_server` -- sets up Consul in server mode (mutually exlusive with consul_agent)
-* `roles::docker` -- sets up Docker and exposes its API
-* `roles::instance_manager` -- runs a container with Instance Manager
+To use, include `tarantool_cloud` class. All its parameters can be tuned via
+hiera. There should be one node where `instance_manager` parameter is set
+to 'true'.
 
 
 ### Configurable Parameters
@@ -82,38 +79,36 @@ expose.
 Every parameter below that is 'undef' you have to fill in before the deployment.
 
 ``` puppet
-class { 'profiles::consul':
+class { 'tarantool_cloud':
+  agent             => false,
+  instance_manager  => false,
   datacenter        => undef,
   bootstrap_address => undef,
   gossip_key        => undef,
   acl_master_token  => undef,
   acl_token         => undef,
   num_servers       => undef,
-  tls_dir => '/etc/tarantool_cloud/tls'
+  advertise_addr    => undef,
+  tls_dir           => '/etc/tarantool_cloud/tls',
+  ca_generator      => '/opt/tarantool_cloud/ca.py',
+  ca_dir            => '/var/tarantool_cloud/ca',
+  consul_data_dir   => '/var/lib/consul'
 }
 ```
 
+* agent -- If 'true', run Consul in agent mode. Otherwise in server mode.
+* instance_manager -- If 'true', install and run Instance Manager.
 * datacenter -- Consul datacenter name (may be arbitrary, but usually `dc1`)
 * bootstrap_address -- Address of one of the Consul servers. Used for bootstrap.
 * gossip_key -- Password to encrypt UDP gossip traffic
 * acl_master_token -- UUID for bootstrapping ACL system
 * acl_token -- UUID token for client access to Consul
-* num_servers -- number of Consul instances in server mode
+* num_servers -- Number of Consul instances in server mode
+* advertise_addr -- This IP address will be used to advertise the node in Consul and Docker
 * tls_dir -- do not change if you rely on auto-generated TLS certificates
-
-``` puppet
-class { 'profiles::tls':
-  ca_generator => '/opt/tarantool_cloud/ca.py',
-  ca_dir       => '/var/tarantool_cloud/ca',
-  tls_dir      => '/etc/tarantool_cloud/tls',
-  datacenter   => hiera('profiles::consul::datacenter')
-}
-```
-
-* ca_generator -- Path to the ca.py script on puppet master
-* ca_dir -- Path on the puppet master that will store generated certificates
-* tls_dir -- do not change if you rely on auto-generated TLS certificates
-* datacenter -- you may override the datacenter to which instance manager connects
+* ca_generator -- Full path to the 'ca.py' scrip on puppet master. This script generates TLS certificates.
+* ca_dir -- Path to the directory on puppet master where TLS certificates will be stored.
+* consul_data_dir -- The directory where Consul will store persistent data
 
 ## Testing
 

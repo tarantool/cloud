@@ -12,37 +12,17 @@
 # All this is required to make encryption work properly. If you still want
 # to generate TLS certs yourself, study the code of ca.py in the cloud/ repo.
 #
-# === Parameters
-#
-# [*ca_generator*]
-#   Full path to the 'ca.py' scrip on puppet master. This script generates
-#   TLS certificates.
-#
-# [*ca_dir*]
-#   Path to the directory on puppet master where TLS certificates will be
-#   stored. The user under which puppet muster runs, must have write
-#   access to this directory
-#
-# [*tls_dir*]
-#   Place where TLS certificates are located. Do not change unless you've
-#   generated them by hand.
-#
-# [*datacenter*]
-#   datacenter name participates in TLS cert generation for servers. This
-#   must be the same as consul datacenter name set in
-#   profiles::consul:datacenter
-#
-class profiles::tls(
-  $ca_generator = '/opt/tarantool_cloud/ca.py',
-  $ca_dir = '/var/tarantool_cloud/ca',
-  $tls_dir = '/etc/tarantool_cloud/tls',
-  $datacenter = hiera('profiles::consul::datacenter')
-) {
-  $server_fqdn = $::hostname
+class tarantool_cloud::tls {
+  $ca_generator = $tarantool_cloud::ca_generator
+  $ca_dir = $tarantool_cloud::ca_dir
+  $tls_dir = $tarantool_cloud::tls_dir
+  $datacenter = $tarantool_cloud::datacenter
   $interface_names = split($::interfaces, ',')
   $interface_ips = $interface_names.map |$ifname| {
     getvar("ipaddress_${ifname}")
   }
+  # this hostname will be used as subjectName in TLS certificates
+  $server_hostname = $::hostname
   $altnames = concat([$::fqdn,
     "${::hostname}.${datacenter}.consul"],
     $interface_ips)
@@ -55,29 +35,29 @@ class profiles::tls(
     path    => $::path
     } -> file { $tls_dir : }
 
-    file { "${tls_dir}/ca.crt":
+    file { "${tls_dir}/ca.pem":
       ensure  => file,
       content => generate($ca_generator, '-d', $ca_dir, 'ca', '--cert')
     }
 
-    file { "${tls_dir}/server.key":
+    file { "${tls_dir}/server_key.pem":
       ensure  => file,
       content => generate($ca_generator, '-d', $ca_dir, 'server', '--key',
-      $server_fqdn, $altnames_str)
+      $server_hostname, $altnames_str)
     }
 
-    file { "${tls_dir}/server.crt":
+    file { "${tls_dir}/server_cert.pem":
       ensure  => file,
       content => generate($ca_generator, '-d', $ca_dir, 'server', '--cert',
-      $server_fqdn, $altnames_str)
+      $server_hostname, $altnames_str)
     }
 
-    file { "${tls_dir}/client.key":
+    file { "${tls_dir}/key.pem":
       ensure  => file,
       content => generate($ca_generator, '-d', $ca_dir, 'client', '--key')
     }
 
-    file { "${tls_dir}/client.crt":
+    file { "${tls_dir}/cert.pem":
       ensure  => file,
       content => generate($ca_generator, '-d', $ca_dir, 'client', '--cert')
     }
