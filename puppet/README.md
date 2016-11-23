@@ -82,7 +82,7 @@ Every parameter below that is 'undef' you have to fill in before the deployment.
 class { 'tarantool_cloud':
   agent             => false,
   instance_manager  => false,
-  datacenter        => undef,
+  datacenter        => 'dc1',
   bootstrap_address => undef,
   gossip_key        => undef,
   acl_master_token  => undef,
