@@ -72,10 +72,6 @@ to 'true'.
 
 ### Configurable Parameters
 
-All parameters can be tuned via hiera, except for the `external_ip` fact that
-must be set on every node, so that Consul and Docker will know which IP to
-expose.
-
 Every parameter below that is 'undef' you have to fill in before the deployment.
 
 ``` puppet
