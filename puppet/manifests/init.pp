@@ -59,20 +59,40 @@
 # [*consul_data_dir*]
 #   The directory where Consul will store persistent data
 #
+# [*elasticsearch*]
+#   If 'true', send Docker logs to elasticsearch
+#
+# [*elasticsearch_host*]
+#   Address of elasticsearch instance to send logs to
+#
+# [*elasticsearch_port*]
+#   Port of the elasticsearch instance
+#
+# [*elasticsearch_index*]
+#   Elasticsearch index to write logs to
+#
+# [*elasticsearch_type*]
+#   Default type of entries sent to elasticsearch
+#
 class tarantool_cloud(
-  $agent             = $tarantool_cloud::params::agent,
-  $instance_manager  = $tarantool_cloud::params::instance_manager,
-  $datacenter        = $tarantool_cloud::params::datacenter,
-  $bootstrap_address = $tarantool_cloud::params::bootstrap_address,
-  $gossip_key        = $tarantool_cloud::params::gossip_key,
-  $acl_master_token  = $tarantool_cloud::params::acl_master_token,
-  $acl_token         = $tarantool_cloud::params::acl_token,
-  $num_servers       = $tarantool_cloud::params::num_servers,
-  $advertise_addr    = $tarantool_cloud::params::advertise_addr,
-  $tls_dir           = $tarantool_cloud::params::tls_dir,
-  $ca_generator      = $tarantool_cloud::params::ca_generator,
-  $ca_dir            = $tarantool_cloud::params::ca_dir,
-  $consul_data_dir   = $tarantool_cloud::params::consul_data_dir
+  $agent               = $tarantool_cloud::params::agent,
+  $instance_manager    = $tarantool_cloud::params::instance_manager,
+  $datacenter          = $tarantool_cloud::params::datacenter,
+  $bootstrap_address   = $tarantool_cloud::params::bootstrap_address,
+  $gossip_key          = $tarantool_cloud::params::gossip_key,
+  $acl_master_token    = $tarantool_cloud::params::acl_master_token,
+  $acl_token           = $tarantool_cloud::params::acl_token,
+  $num_servers         = $tarantool_cloud::params::num_servers,
+  $advertise_addr      = $tarantool_cloud::params::advertise_addr,
+  $tls_dir             = $tarantool_cloud::params::tls_dir,
+  $ca_generator        = $tarantool_cloud::params::ca_generator,
+  $ca_dir              = $tarantool_cloud::params::ca_dir,
+  $consul_data_dir     = $tarantool_cloud::params::consul_data_dir,
+  $elasticsearch       = $tarantool_cloud::params::elasticsearch,
+  $elasticsearch_host  = $tarantool_cloud::params::elasticsearch_host,
+  $elasticsearch_port  = $tarantool_cloud::params::elasticsearch_port,
+  $elasticsearch_index = $tarantool_cloud::params::elasticsearch_index,
+  $elasticsearch_type  = $tarantool_cloud::params::elasticsearch_type
 ) inherits tarantool_cloud::params {
   validate_bool($agent)
   validate_bool($instance_manager)
@@ -98,6 +118,8 @@ class tarantool_cloud(
   }
 
   contain 'tarantool_cloud::docker'
+
+  contain 'tarantool_cloud::fluentd'
 
   if ($instance_manager) {
     contain 'tarantool_cloud::instance_manager'

@@ -76,19 +76,24 @@ Every parameter below that is 'undef' you have to fill in before the deployment.
 
 ``` puppet
 class { 'tarantool_cloud':
-  agent             => false,
-  instance_manager  => false,
-  datacenter        => 'dc1',
-  bootstrap_address => undef,
-  gossip_key        => undef,
-  acl_master_token  => undef,
-  acl_token         => undef,
-  num_servers       => undef,
-  advertise_addr    => undef,
-  tls_dir           => '/etc/tarantool_cloud/tls',
-  ca_generator      => '/opt/tarantool_cloud/ca.py',
-  ca_dir            => '/var/tarantool_cloud/ca',
-  consul_data_dir   => '/var/lib/consul'
+  agent              => false,
+  instance_manager    => false,
+  datacenter          => 'dc1',
+  bootstrap_address   => undef,
+  gossip_key          => undef,
+  acl_master_token    => undef,
+  acl_token           => undef,
+  num_servers         => undef,
+  advertise_addr      => undef,
+  tls_dir             => '/etc/tarantool_cloud/tls',
+  ca_generator        => '/opt/tarantool_cloud/ca.py',
+  ca_dir              => '/var/tarantool_cloud/ca',
+  consul_data_dir     => '/var/lib/consul',
+  elasticsearch       => false
+  elasticsearch_host  => undef
+  elasticsearch_port  => 9200
+  elasticsearch_index => 'fluentd'
+  elasticsearch_type  => 'fluentd'
 }
 ```
 
@@ -105,6 +110,11 @@ class { 'tarantool_cloud':
 * ca_generator -- Full path to the 'ca.py' scrip on puppet master. This script generates TLS certificates.
 * ca_dir -- Path to the directory on puppet master where TLS certificates will be stored.
 * consul_data_dir -- The directory where Consul will store persistent data
+* elasticsearch -- If 'true', send Docker logs to elasticsearch
+* elasticsearch_host -- Address of elasticsearch instance to send logs to
+* elasticsearch_port -- Port of the elasticsearch instance
+* elasticsearch_index -- Elasticsearch index to write logs to
+* elasticsearch_type -- Default type of entries sent to elasticsearch
 
 ## Testing
 

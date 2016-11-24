@@ -19,6 +19,8 @@ class tarantool_cloud::docker{
     tls_cert         => "${tarantool_cloud::tls_dir}/server_cert.pem",
     tls_key          => "${tarantool_cloud::tls_dir}/server_key.pem",
     docker_users     => ['consul'],
+    log_driver       => 'fluentd',
+    log_opt          => ['fluentd-address=localhost:24224'],
     extra_parameters => "--cluster-store=consul://localhost:8500 \
       --cluster-advertise=${tarantool_cloud::advertise_addr}:2376"
   }

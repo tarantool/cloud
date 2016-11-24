@@ -22,7 +22,8 @@
         { "name": "puppetlabs/stdlib" },
         { "name": "puppetlabs/firewall" },
         { "name": "garethr/docker" },
-        { "name": "KyleAnderson/consul" }
+        { "name": "KyleAnderson/consul" },
+        { "name": "konstantin/fluentd" }
     ],
     "data_provider": "hiera"
 }
