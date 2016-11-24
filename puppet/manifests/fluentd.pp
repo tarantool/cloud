@@ -39,7 +39,12 @@ class tarantool_cloud::fluentd {
       'match'  => {
         'tag_pattern' => '**',
         'type'        => 'copy',
-        'store'       => $store
+        'store'       => [
+          $store,
+          {
+          'type' => 'file',
+          'path' => '/var/log/td-agent/docker'
+          }]
       }
     }
   }
