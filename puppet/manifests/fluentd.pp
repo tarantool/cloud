@@ -13,11 +13,13 @@ class tarantool_cloud::fluentd {
 
   if $tarantool_cloud::elasticsearch {
     $store = {
-      'type'       => 'elasticsearch',
-      'host'       => $tarantool_cloud::elasticsearch_host,
-      'port'       => $tarantool_cloud::elasticsearch_port,
-      'index_name' => $tarantool_cloud::elasticsearch_index,
-      'type_name'  => $tarantool_cloud::elasticsearch_type
+      'logstash_format' => true,
+      'type'            => 'elasticsearch',
+      'logstash_prefix' => $tarantool_cloud::logstash_prefix,
+      'host'            => $tarantool_cloud::elasticsearch_host,
+      'port'            => $tarantool_cloud::elasticsearch_port,
+      'index_name'      => $tarantool_cloud::elasticsearch_index,
+      'type_name'       => $tarantool_cloud::elasticsearch_type
     }
   }
   else {
@@ -36,6 +38,11 @@ class tarantool_cloud::fluentd {
         'bind' => '127.0.0.1'
         }
       ],
+      'filter' => {
+          'tag_pattern' => '**',
+          'type'        => 'record_transformer',
+          'record'      => {'hostname'=> '${hostname}'}
+      },
       'match'  => {
         'tag_pattern' => '**',
         'type'        => 'copy',

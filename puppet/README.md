@@ -115,7 +115,7 @@ class { 'tarantool_cloud':
 * elasticsearch_port -- Port of the elasticsearch instance
 * elasticsearch_index -- Elasticsearch index to write logs to
 * elasticsearch_type -- Default type of entries sent to elasticsearch
-
+* logstash_prefix -- Elasticsearch index prefix
 ## Testing
 
 This manifest has no integration tests, but there is a test-kitchen definition

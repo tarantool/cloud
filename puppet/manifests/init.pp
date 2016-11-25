@@ -74,6 +74,9 @@
 # [*elasticsearch_type*]
 #   Default type of entries sent to elasticsearch
 #
+# [*logstash_prefix*]
+#   Elasticsearch index prefix
+#
 class tarantool_cloud(
   $agent               = $tarantool_cloud::params::agent,
   $instance_manager    = $tarantool_cloud::params::instance_manager,
@@ -92,7 +95,8 @@ class tarantool_cloud(
   $elasticsearch_host  = $tarantool_cloud::params::elasticsearch_host,
   $elasticsearch_port  = $tarantool_cloud::params::elasticsearch_port,
   $elasticsearch_index = $tarantool_cloud::params::elasticsearch_index,
-  $elasticsearch_type  = $tarantool_cloud::params::elasticsearch_type
+  $elasticsearch_type  = $tarantool_cloud::params::elasticsearch_type,
+  $logstash_prefix     = $tarantool_cloud::params::logstash_prefix
 ) inherits tarantool_cloud::params {
   validate_bool($agent)
   validate_bool($instance_manager)
