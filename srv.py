@@ -155,11 +155,21 @@ class Group(Resource):
 
         abort_if_group_doesnt_exist(group_id)
 
-        delete_task = memcached.DeleteTask(group_id)
-        TASKS[delete_task.task_id] = delete_task
+        blueprints = sense.Sense.blueprints()
+        group = blueprints[group_id]
 
-        memc = memcached.Memcached.get(group_id)
-        gevent.spawn(memc.delete, delete_task)
+        if group['type'] == 'memcached':
+            delete_task = memcached.DeleteTask(group_id)
+            TASKS[delete_task.task_id] = delete_task
+
+            memc = memcached.Memcached.get(group_id)
+            gevent.spawn(memc.delete, delete_task)
+        elif group['type'] == 'tarantino':
+            delete_task = tarantino.DeleteTask(group_id)
+            TASKS[delete_task.task_id] = delete_task
+
+            tar = tarantino.Tarantino.get(group_id)
+            gevent.spawn(tar.delete, delete_task)
 
         if args['async']:
             result = {'id': group_id,
@@ -177,6 +187,7 @@ class Group(Resource):
         parser.add_argument('name')
         parser.add_argument('memsize', type=float)
         parser.add_argument('async', type=bool, default=False)
+        parser.add_argument('heal', type=bool, default=False)
         parser.add_argument('password', type=str)
         parser.add_argument('docker_image_name')
         parser.add_argument('config',
@@ -199,6 +210,7 @@ class Group(Resource):
                          args['memsize'],
                          args['password'],
                          args['docker_image_name'],
+                         args['heal'],
                          update_task)
 
         elif group['type'] == 'tarantino':

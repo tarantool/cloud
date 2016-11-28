@@ -13,7 +13,16 @@ local os = require('os')
 local AUTH_FILE_PATH = '/opt/tarantool/auth.sasldb'
 
 local memcached_password = os.getenv('MEMCACHED_PASSWORD') or nil
+local memcached_password_base64 = os.getenv('MEMCACHED_PASSWORD_BASE64') or nil
+
 local auth_file_exists = fio.stat(AUTH_FILE_PATH) ~= nil
+
+if memcached_password_base64 ~= nil and not auth_file_exists then
+    local cmd = "echo '" .. memcached_password_base64 .. "' |" ..
+        "base64 -d | gunzip > '" .. AUTH_FILE_PATH .. "'"
+    os.execute(cmd)
+    auth_file_exists = true
+end
 
 if memcached_password ~= nil and not auth_file_exists then
     local cmd = "echo '" .. memcached_password .. "' |" ..

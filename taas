@@ -380,10 +380,12 @@ def rm_command(host, group_id_list, auth, verbose):
         print('')
 
 
-def update_command(host, group_id, name, memsize, password, config,
+def update_command(host, group_id, name, memsize, password, config, heal,
                    auth, verbose):
     data = {'async': True}
     files = None
+    if heal:
+        data['heal'] = True
     if name:
         data['name'] = name
     if memsize:
@@ -579,6 +581,11 @@ def main():
     update_parser.add_argument('group_id',
                                help='group ID to update')
 
+    heal_parser = subparsers.add_parser(
+        'heal', help='heal an existing group')
+    heal_parser.add_argument('group_id',
+                             help='group ID to heal')
+
     upgrade_parser = subparsers.add_parser(
         'upgrade', help='upgrade an existing group')
     upgrade_parser.add_argument('group_id',
@@ -611,11 +618,14 @@ def main():
         rm_command(host, args.group_id, auth, args.verbose)
     elif args.subparser_name == 'update':
         update_command(host, args.group_id, args.name,
-                       args.memsize, args.password, args.config,
+                       args.memsize, args.password, args.config, False,
                        auth, args.verbose)
     elif args.subparser_name == 'upgrade':
         upgrade_command(host, args.group_id, auth, args.verbose)
-
+    elif args.subparser_name == 'heal':
+        update_command(host, args.group_id, None,
+                       None, None, None, True,
+                       auth, args.verbose)
 
 if __name__ == '__main__':
     main()

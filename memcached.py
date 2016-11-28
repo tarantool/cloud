@@ -15,6 +15,11 @@ import allocate
 import datetime
 import json
 import task
+import tarfile
+import base64
+import gzip
+import io
+import shutil
 
 class MemcachedTask(task.Task):
     memcached_task_type = None
@@ -147,8 +152,11 @@ class Memcached(group.Group):
             raise
 
     def update(self, name, memsize, password,
-               docker_image_name, update_task):
+               docker_image_name, heal, update_task):
         try:
+            if heal:
+                self.heal(update_task)
+
             if name and name != self.blueprint['name']:
                 self.rename(name, update_task)
 
@@ -168,6 +176,36 @@ class Memcached(group.Group):
             update_task.set_status(task.STATUS_CRITICAL, str(ex))
 
             raise
+
+    def heal(self, update_task):
+        blueprint = self.blueprint
+        allocation = self.allocation
+        containers = self.containers
+
+        if len(containers['instances']) == 2:
+            update_task.log("All containers are present. No need to heal.")
+            return
+
+        if len(containers['instances']) == 0:
+            update_task.log("No live containers. Can't heal.")
+            raise RuntimeError("No live containers")
+
+        instance_num = str(3-int(list(containers['instances'].keys())[0]))
+        other_instance_num = list(containers['instances'].keys())[0]
+        password_base64 = self.get_instance_password(other_instance_num)
+        update_task.log("Re-creating container %s from %s",
+                        instance_num,
+                        other_instance_num)
+        if password_base64 is not None:
+            update_task.log("Will set password for %s", instance_num)
+
+        self.create_container(instance_num, other_instance_num,
+                              password=None,
+                              password_base64=password_base64)
+
+
+
+
 
     def rename(self, name, update_task):
         consul_obj = consul.Consul(host=global_env.consul_host,
@@ -198,7 +236,6 @@ class Memcached(group.Group):
         self.set_instance_password("1", password)
         update_task.log("Setting password for instance 2")
         self.set_instance_password("2", password)
-
 
     def allocate(self):
         consul_obj = consul.Consul(host=global_env.consul_host,
@@ -234,8 +271,8 @@ class Memcached(group.Group):
         self.unregister_instance("2")
 
     def create_containers(self, password):
-        self.create_container("1", password)
-        self.create_container("2", password)
+        self.create_container("1", None, password, None)
+        self.create_container("2", "1", password, None)
 
     def remove_containers(self):
         self.remove_container("1")
@@ -401,7 +438,10 @@ class Memcached(group.Group):
                          instance_id)
 
 
-    def create_container(self, instance_num, password):
+    def create_container(self, instance_num,
+                         other_instance_num,
+                         password,
+                         password_base64):
         blueprint = self.blueprint
         allocation = self.allocation
 
@@ -426,8 +466,8 @@ class Memcached(group.Group):
             raise RuntimeError("No such Docker host: '%s'" % docker_host)
 
         replica_ip = None
-        if instance_num == '2':
-            replica_ip = blueprint['instances']['1']['addr']
+        if other_instance_num is not None:
+            replica_ip = blueprint['instances'][other_instance_num]['addr']
 
         docker_obj = docker.Client(base_url=docker_addr,
                                    tls=global_env.docker_tls_config)
@@ -474,6 +514,8 @@ class Memcached(group.Group):
 
         if password:
             environment['MEMCACHED_PASSWORD'] = password
+        if password_base64:
+            environment['MEMCACHED_PASSWORD_BASE64'] = password_base64
 
         if replica_ip:
             environment['TARANTOOL_REPLICATION_SOURCE'] = replica_ip + ':3301'
@@ -717,6 +759,51 @@ class Memcached(group.Group):
         else:
             logging.info("Not setting password for '%s', as it doesn't exist",
                          instance_id)
+
+    def get_instance_password(self, instance_num):
+        containers = self.containers
+
+        if instance_num not in containers['instances']:
+            return
+
+        instance_id = self.group_id + '_' + instance_num
+        docker_hosts = [h['addr'].split(':')[0] for h in Sense.docker_hosts()
+                        if h['status'] == 'passing']
+
+        if containers:
+            docker_host = containers['instances'][instance_num]['host']
+            docker_hosts = Sense.docker_hosts()
+
+            docker_addr = None
+            for host in docker_hosts:
+                if host['addr'].split(':')[0] == docker_host or \
+                   host['consul_host'] == docker_host:
+                    docker_addr = host['addr']
+            if not docker_addr:
+                raise RuntimeError("No such Docker host: '%s'" % docker_host)
+
+            logging.info("Getting password for '%s' on '%s'",
+                         instance_id,
+                         docker_host)
+
+            docker_obj = docker.Client(base_url=docker_addr,
+                                       tls=global_env.docker_tls_config)
+
+            try:
+                strm, stat = docker_obj.get_archive(instance_id, '/opt/tarantool/auth.sasldb')
+                bio = io.BytesIO()
+                shutil.copyfileobj(strm, bio)
+                bio.seek(0)
+                tar = tarfile.open(fileobj=bio)
+
+                fobj = tar.extractfile('auth.sasldb')
+                return base64.b64encode(gzip.compress(fobj.read()))
+            except docker.errors.NotFound:
+                return None
+
+        else:
+            raise RuntimeError("No such container: %s", instance_id)
+
 
 
     def ensure_image(self, docker_addr):
