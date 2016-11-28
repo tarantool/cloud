@@ -199,9 +199,15 @@ class Memcached(group.Group):
         if password_base64 is not None:
             update_task.log("Will set password for %s", instance_num)
 
+        update_task.log("Unregistering container %s", instance_num)
+        self.unregister_instance(instance_num)
+
         self.create_container(instance_num, other_instance_num,
                               password=None,
                               password_base64=password_base64)
+
+        update_task.log("Registring container %s", instance_num)
+        self.register_instance(instance_num)
 
 
 
