@@ -181,7 +181,7 @@ class Tarantool(group.Group):
                     "Supported types: %s", supported_types.join(', '))
 
             update_task.log("Updating config of group %s", self.group_id)
-            self.update_config(config_data, update_task)
+            self.update_config(config_data, config_filename, update_task)
 
             if docker_image_name:
                 self.upgrade(update_task)
@@ -250,11 +250,11 @@ class Tarantool(group.Group):
         kv.put('tarantool/%s/blueprint/memsize' % self.group_id, str(memsize))
         update_task.log("Completed resizing")
 
-    def update_config(self, config_data, update_task):
+    def update_config(self, config_data, config_filename, update_task):
         update_task.log("Updateing config of instance 1")
-        self.update_instance_config("1", config_data)
+        self.update_instance_config("1", config_data, config_filename)
         update_task.log("Updating config of instance 2")
-        self.update_instance_config("2", config_data)
+        self.update_instance_config("2", config_data, config_filename)
 
     def set_password(self, password, update_task):
         update_task.log("Setting password for instance 1")
@@ -738,8 +738,21 @@ class Tarantool(group.Group):
             logging.info("Not resizing container '%s', as it doesn't exist",
                          instance_id)
 
-    def update_instance_config(self, instance_num, config_data):
-        tar = gzip.decompress(config_data)
+    def update_instance_config(self, instance_num,
+                               config_data, config_filename):
+        config_ext = splitext(config_filename)[1]
+        if config_ext in ('.tar.gz', '.tgz'):
+            tar = gzip.decompress(config_data)
+        else:
+            bio = io.BytesIO()
+            tar = tarfile.TarFile(fileobj=bio, mode='w')
+            tarinfo = tarfile.TarInfo(name='app.lua')
+            tarinfo.size = len(config_data)
+            tar.addfile(tarinfo, fileobj=io.BytesIO(config_data))
+
+            bio.seek(0)
+            tar = bio
+
         containers = self.containers
 
         if instance_num not in containers['instances']:
