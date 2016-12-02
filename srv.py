@@ -10,6 +10,7 @@ import uuid
 import ipaddress
 import memcached
 import tarantino
+import tarantool
 import sense
 import global_env
 import logging
@@ -170,6 +171,12 @@ class Group(Resource):
 
             tar = tarantino.Tarantino.get(group_id)
             gevent.spawn(tar.delete, delete_task)
+        elif group['type'] == 'tarantool':
+            delete_task = tarantool.DeleteTask(group_id)
+            TASKS[delete_task.task_id] = delete_task
+
+            tar = tarantool.Tarantool.get(group_id)
+            gevent.spawn(tar.delete, delete_task)
 
         if args['async']:
             result = {'id': group_id,
@@ -193,6 +200,7 @@ class Group(Resource):
         parser.add_argument('config',
                             type=werkzeug.datastructures.FileStorage,
                             location='files')
+        parser.add_argument('config_is_dir', type=bool, default=False)
 
         args = parser.parse_args()
 
@@ -231,6 +239,28 @@ class Group(Resource):
                          config_data,
                          args['docker_image_name'],
                          update_task)
+        elif group['type'] == 'tarantool':
+            tar = tarantool.Tarantool.get(group_id)
+
+            update_task = tarantool.UpdateTask(group_id)
+            TASKS[update_task.task_id] = update_task
+
+            config_data = None
+            config_filename = None
+            if args['config']:
+                stream = args['config'].stream
+                config_data = stream.getvalue()
+                config_filename = args['config'].filename
+
+            gevent.spawn(tar.update,
+                         args['name'],
+                         args['memsize'],
+                         args['password'],
+                         config_data,
+                         config_filename,
+                         args['docker_image_name'],
+                         args['heal'],
+                         update_task)
         else:
             raise RuntimeError("Unknown group type: %s" % group['type'])
 
@@ -265,10 +295,11 @@ class GroupList(Resource):
 
         args = parser.parse_args()
         group_id = uuid.uuid4().hex
-        create_task = memcached.CreateTask(group_id)
-        TASKS[create_task.task_id] = create_task
 
         if args['type'] == 'memcached':
+            create_task = memcached.CreateTask(group_id)
+            TASKS[create_task.task_id] = create_task
+
             gevent.spawn(memcached.Memcached.create,
                          create_task,
                          args['name'],
@@ -276,7 +307,20 @@ class GroupList(Resource):
                          args['password'],
                          10)
         elif args['type'] == 'tarantino':
+            create_task = tarantino.CreateTask(group_id)
+            TASKS[create_task.task_id] = create_task
+
             gevent.spawn(tarantino.Tarantino.create,
+                         create_task,
+                         args['name'],
+                         args['memsize'],
+                         args['password'],
+                         10)
+        elif args['type'] == 'tarantool':
+            create_task = tarantool.CreateTask(group_id)
+            TASKS[create_task.task_id] = create_task
+
+            gevent.spawn(tarantool.Tarantool.create,
                          create_task,
                          args['name'],
                          args['memsize'],

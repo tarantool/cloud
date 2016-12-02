@@ -13,8 +13,8 @@ import urllib
 import urllib2
 import base64
 import collections
-
-
+import tarfile
+import StringIO
 
 GROUP_KEY_ORDER = ["id", "creation_time", "name", "type", "memsize"]
 
@@ -393,9 +393,25 @@ def update_command(host, group_id, name, memsize, password, config, heal,
     if password:
         data['password'] = password
     if config:
-        config_data = open(config).read()
-        files = {'config': {'filename': os.path.basename(config),
-                            'content': config_data}}
+        config = os.path.expanduser(config)
+        config = os.path.realpath(config)
+        filedata = None
+        if os.path.isdir(config):
+            out = StringIO.StringIO()
+            tar = tarfile.open(fileobj=out, mode="w:gz")
+            tar.add(config, arcname=".")
+            tar.close()
+            filename = 'config.tar.gz'
+            filedata = out.getvalue()
+            is_dir = True
+        else:
+            filename = os.path.basename(config)
+            filedata = open(config).read()
+            is_dir = False
+
+        files = {'config': {'filename': filename,
+                            'content': filedata}}
+        data['config_is_dir'] = is_dir
 
     url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
 
@@ -548,7 +564,7 @@ def main():
         default=0.5)
     run_parser.add_argument(
         '--password',
-        help='password for accessing this group via memcached protocol')
+        help='password for accessing this group')
     run_parser.add_argument(
         'type',
         help='instance type to run (default is memcached)',
@@ -591,6 +607,13 @@ def main():
     upgrade_parser.add_argument('group_id',
                                 help='group ID to upgrade')
 
+    deploy_parser = subparsers.add_parser(
+        'deploy', help='deploy configuration to an existing group')
+    deploy_parser.add_argument('group_id',
+                                help='group ID to deploy to')
+    deploy_parser.add_argument('path',
+                                help='path to deploy from')
+
     args = parser.parse_args()
 
     auth = None
@@ -626,6 +649,11 @@ def main():
         update_command(host, args.group_id, None,
                        None, None, None, True,
                        auth, args.verbose)
+    elif args.subparser_name == 'deploy':
+        update_command(host, args.group_id, None,
+                       None, None, args.path, False,
+                       auth, args.verbose)
+
 
 if __name__ == '__main__':
     main()
