@@ -173,15 +173,16 @@ class Tarantool(group.Group):
             if password:
                 self.set_password(password, update_task)
 
-            supported_types = ('.tar.gz', '.tgz', '.lua')
-            config_ext = splitext(config_filename)[1]
-            if config_ext not in supported_types:
-                raise RuntimeError(
-                    "File of type '%s' is not supported." +
-                    "Supported types: %s", supported_types.join(', '))
+            if config_data:
+                supported_types = ('.tar.gz', '.tgz', '.lua')
+                config_ext = splitext(config_filename)[1]
+                if config_ext not in supported_types:
+                    raise RuntimeError(
+                        "File of type '%s' is not supported." +
+                        "Supported types: %s", supported_types.join(', '))
 
-            update_task.log("Updating config of group %s", self.group_id)
-            self.update_config(config_data, config_filename, update_task)
+                update_task.log("Updating config of group %s", self.group_id)
+                self.update_config(config_data, config_filename, update_task)
 
             if docker_image_name:
                 self.upgrade(update_task)
