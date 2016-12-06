@@ -1,0 +1,55 @@
+---
+driver:
+  name: vagrant
+  customize:
+    memory: 2048
+
+platforms:
+  - name: ubuntu-16.04
+    driver:
+      box: bento/ubuntu-16.04
+      image: ubuntu-16-04-x64
+
+provisioner:
+  name: dummy
+
+suites:
+  - name: node1
+    driver:
+      vm_hostname: node1
+    driver:
+      network:
+        - ["private_network", {ip: "172.16.20.12"}]
+
+  - name: node2
+    driver:
+      vm_hostname: node2
+    driver:
+      network:
+        - ["private_network", {ip: "172.16.20.13"}]
+
+  - name: node3
+    driver:
+      vm_hostname: node3
+    driver:
+      network:
+        - ["private_network", {ip: "172.16.20.14"}]
+
+
+  - name: provisioner
+    driver:
+      vm_hostname: provisioner
+    driver:
+      network:
+        - ["private_network", {ip: "172.16.20.15"}]
+    provisioner:
+      name: ansible_playbook
+      roles_path: roles
+      require_ansible_repo: true
+      ansible_verbose: true
+      #ansible_verbosity: 3
+      ansible_version: latest
+      require_chef_for_busser: false
+      ansible_inventory: test/shared/inventory.cfg
+      playbook: site.yml
+      ansible_host_key_checking: false

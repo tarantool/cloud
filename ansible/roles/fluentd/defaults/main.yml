@@ -1,0 +1,6 @@
+tdagent_plugins:
+  - fluent-plugin-elasticsearch
+
+elasticsearch_port: 9200
+elasticsearch_index: fluentd
+elasticsearch_type: fluentd

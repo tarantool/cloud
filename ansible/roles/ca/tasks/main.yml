@@ -10,6 +10,11 @@
     tarantool_cloud_tls_dir: '{{tarantool_cloud_tls_dir_default}}'
   when: inventory_hostname != 'localhost'
 
+- name: create directory for ca certificates
+  file: path='{{tarantool_cloud_tls_dir}}' state=directory
+  when: inventory_hostname != 'localhost'
+
+
 - set_fact:
     tarantool_cloud_tls_ca_cert_file: '{{tarantool_cloud_tls_dir}}/ca.pem'
     tarantool_cloud_tls_ca_key_file: '{{tarantool_cloud_tls_dir}}/ca-key.pem'

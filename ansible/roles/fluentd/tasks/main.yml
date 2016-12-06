@@ -1,0 +1,54 @@
+---
+# file: tasks/main.yml
+# Top-level installer for Fluentd.
+#
+# @see http://docs.treasuredata.com/articles/td-agent
+#
+
+- name: set role variables, if necessary
+  include: set-role-variables.yml
+
+- name: delegate to APT system for installation
+  include: use-apt.yml
+  when: ansible_pkg_mgr == "apt"
+
+- name: delegate to YUM system for installation
+  include: use-yum.yml
+  when: ansible_pkg_mgr == "yum"
+
+- name: mkdir for conf.d
+  file:
+    path: /etc/td-agent/conf.d
+    state: directory
+    owner: td-agent
+    group: td-agent
+
+- name: install td-agent.conf
+  template:
+    src: td-agent.conf.j2
+    dest: /etc/td-agent/td-agent.conf
+    owner: td-agent
+    group: td-agent
+  notify:
+    - reload td-agent
+
+- name: install plugins, if any
+  gem:
+      name: "{{ item }}"
+      executable: /opt/td-agent/embedded/bin/fluent-gem
+      state: latest
+      user_install: no
+  with_items: "{{ tdagent_plugins | default([]) }}"
+  notify:
+    - restart td-agent
+
+- name: install plugins with specified versions, if any
+  gem:
+      name: "{{ item.value.name }}"
+      executable: /opt/td-agent/embedded/bin/fluent-gem
+      state: present
+      version: "{{ item.value.version }}"
+      user_install: no
+  with_dict: "{{ tdagent_plugins_versions | default({}) }}"
+  notify:
+    - restart td-agent

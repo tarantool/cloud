@@ -12,6 +12,10 @@
 
 - hosts: cloud-node
   roles:
+    - fluentd
+
+- hosts: cloud-node
+  roles:
     - node
     - docker
 
