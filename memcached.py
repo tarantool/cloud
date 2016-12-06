@@ -202,6 +202,9 @@ class Memcached(group.Group):
         update_task.log("Unregistering container %s", instance_num)
         self.unregister_instance(instance_num)
 
+        update_task.log("Disconnecting container %s", instance_num)
+        self.disconnect_instance(instance_num)
+
         self.create_container(instance_num, other_instance_num,
                               password=None,
                               password_base64=password_base64)
@@ -401,6 +404,39 @@ class Memcached(group.Group):
                                               check_id=instance_id + '_memory',
                                               service_id=instance_id)
 
+    def disconnect_instance(self, instance_num):
+        blueprint = self.blueprint
+        allocation = self.allocation
+
+        instance_id = self.group_id + '_' + instance_num
+        addr = blueprint['instances'][instance_num]['addr']
+        memsize = blueprint['memsize']
+        network_settings = Sense.network_settings()
+        network_name = network_settings['network_name']
+        if not network_name:
+            raise RuntimeError("Network name is not specified in settings")
+
+        docker_host = allocation['instances'][instance_num]['host']
+        docker_hosts = Sense.docker_hosts()
+
+        docker_addr = None
+        for host in docker_hosts:
+            if host['addr'].split(':')[0] == docker_host or \
+               host['consul_host'] == docker_host:
+                docker_addr = host['addr']
+
+        if not docker_addr:
+            raise RuntimeError("No such Docker host: '%s'" % docker_host)
+
+        docker_obj = docker.Client(base_url=docker_addr,
+                                   tls=global_env.docker_tls_config)
+
+        try:
+            docker_obj.disconnect_container_from_network(instance_id,
+                                                         network_name,
+                                                         force=True)
+        except:
+            pass
 
     def unregister_instance(self, instance_num):
         services = self.services
