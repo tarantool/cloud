@@ -1,11 +1,5 @@
 ---
 
-- include: ubuntu.yml
-  when: ansible_distribution == 'Ubuntu'
-
-- include: centos.yml
-  when: ansible_distribution == 'CentOS' or ansible_distribution == 'RedHat'
-
 - name: installs 'python-consul'
   pip:
     name: python-consul
@@ -25,6 +19,8 @@
     path: '/var/consul'
     owner: 100
     group: 1000
+
+- include: install.yml
 
 
 - set_fact:
@@ -52,57 +48,13 @@
 - name: creates consul configuration file
   template:
     src: 'consul.json.j2'
-    dest: '/etc/consul/config.json'
+    dest: "{{consul_config_file}}"
+    owner: "{{consul_user}}"
+    group: "{{consul_group}}"
+    mode: 0755
   notify:
-    - 'restart consul'
+    - "{{ consul_restart_handler }}"
 
-- name: retrieves and launches 'consul' image in server mode
-  docker_container:
-    docker_api_version: '{{ docker_api_version }}'
-    image: 'consul'
-    volumes:
-      - '/var/consul:/consul/data'
-      - '/etc/consul:/consul/config'
-      - '/etc/tarantool-cloud/tls:/consul/tls:ro'
-      - '/etc/tarantool-cloud/tls/client-cert.pem:/docker/tls/cert.pem'
-      - '/etc/tarantool-cloud/tls/client-key.pem:/docker/tls/key.pem'
-      - '/etc/tarantool-cloud/tls/ca.pem:/docker/tls/ca.pem'
-    env:
-      DOCKER_HOST: 'tcp://{{ ansible_default_ipv4["address"] }}:2376'
-      DOCKER_TLS_VERIFY: '1'
-      DOCKER_CERT_PATH: '/docker/tls'
-    network_mode: host
-    name: consul
-    command: agent -server
-    state: started
-    pull: true
-    restart_policy: always
-    restart_retries: 3
-  when: consul_server == 'true'
-
-- name: retrieves and launches 'consul' image in client mode
-  docker_container:
-    api_version: '{{ docker_api_version }}'
-    image: 'consul'
-    volumes:
-      - '/var/consul:/consul/data'
-      - '/etc/consul:/consul/config'
-      - '/etc/tarantool-cloud/tls:/consul/tls:ro'
-      - '/etc/tarantool-cloud/tls/client-cert.pem:/docker/tls/cert.pem'
-      - '/etc/tarantool-cloud/tls/client-key.pem:/docker/tls/key.pem'
-      - '/etc/tarantool-cloud/tls/ca.pem:/docker/tls/ca.pem'
-    env:
-      DOCKER_HOST: '{{ ansible_default_ipv4["address"] }}:2376'
-      DOCKER_TLS_VERIFY: '1'
-      DOCKER_CERT_PATH: '/docker/tls'
-    network_mode: host
-    name: consul
-    command: 'agent'
-    state: started
-    pull: true
-    restart_policy: always
-    restart_retries: 3
-  when: consul_server != 'true'
 
 - name: creates acl token for consul servers
   consul_acl:

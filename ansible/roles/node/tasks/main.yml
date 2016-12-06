@@ -72,6 +72,8 @@
 
 - name: create certificate directory
   file: path='{{tarantool_cloud_tls_dir_default}}' state=directory
+- name: create certificate directory for docker
+  file: path='{{tarantool_cloud_tls_dir_default}}/docker' state=directory
 
 - name: create local certificate directory
   vars:
@@ -106,3 +108,12 @@
     - 'client-key.pem'
     - 'client-cert.pem'
     - 'ca.pem'
+
+- name: "docker cert: cert.pem"
+  copy: remote_src=True src='{{tarantool_cloud_tls_dir_default}}/client-cert.pem' dest='{{tarantool_cloud_tls_dir_default}}/docker/cert.pem'
+
+- name: "docker cert: key.pem"
+  copy: remote_src=True src='{{tarantool_cloud_tls_dir_default}}/client-key.pem' dest='{{tarantool_cloud_tls_dir_default}}/docker/key.pem'
+
+- name: "docker cert: ca.pem"
+  copy: remote_src=True src='{{tarantool_cloud_tls_dir_default}}/ca.pem' dest='{{tarantool_cloud_tls_dir_default}}/docker/ca.pem'

@@ -1,0 +1,19 @@
+[Unit]
+Description=Consul Agent
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+Environment="GOMAXPROCS=`nproc`"
+Environment="DOCKER_CERT_PATH=/etc/tarantool-cloud/tls/docker"
+Environment="DOCKER_TLS_VERIFY=1"
+Environment="DOCKER_HOST=tcp://{{ ansible_default_ipv4["address"] }}:2376"
+Restart=on-failure
+User={{ consul_user }}
+Group={{ consul_group }}
+ExecStart={{ consul_home }}/bin/consul agent -config-dir {{ consul_config_dir }} -config-file={{ consul_config_file }}
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

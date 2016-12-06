@@ -2,6 +2,8 @@
   {% if consul_server == 'true' %}
     "bootstrap_expect": 3,
   {% endif%}
+  "server": {{ "true" if consul_server else "false" }},
+  "data_dir": "{{ consul_data_dir }}",
   "retry_join": [{{consul_retry_join.strip()}}],
   "check_update_interval": "0s",
   "advertise_addr": "{{advertise_addr}}",
@@ -12,9 +14,9 @@
   "verify_incoming": true,
   "verify_outgoing": true,
   "verify_server_hostname": false,
-  "ca_file": "/consul/tls/ca.pem",
-  "cert_file": "/consul/tls/server-cert.pem",
-  "key_file": "/consul/tls/server-key.pem",
+  "ca_file": "/etc/tarantool-cloud/tls/ca.pem",
+  "cert_file": "/etc/tarantool-cloud/tls/server-cert.pem",
+  "key_file": "/etc/tarantool-cloud/tls/server-key.pem",
   "acl_datacenter": "dc1",
   "acl_default_policy": "deny",
   "acl_down_policy": "deny",
