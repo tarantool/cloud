@@ -21,6 +21,7 @@ import gzip
 import io
 import shutil
 import os
+import yaml
 
 def splitext(path):
     for ext in ['.tar.gz', '.tar.bz2']:
@@ -210,19 +211,28 @@ class Tarantool(group.Group):
 
         instance_num = str(3-int(list(containers['instances'].keys())[0]))
         other_instance_num = list(containers['instances'].keys())[0]
-        password_base64 = self.get_instance_password(other_instance_num)
+        password = self.get_instance_password(other_instance_num)
         update_task.log("Re-creating container %s from %s",
                         instance_num,
                         other_instance_num)
-        if password_base64 is not None:
+        if password is not None:
             update_task.log("Will set password for %s", instance_num)
 
         update_task.log("Unregistering container %s", instance_num)
         self.unregister_instance(instance_num)
 
+        code_link = self.get_instance_current_code(other_instance_num)
+        code = self.get_instance_code(other_instance_num, code_link)
+
+        update_task.log("Creating container %s", instance_num)
         self.create_container(instance_num, other_instance_num,
-                              password=None,
-                              password_base64=password_base64)
+                              password=password)
+
+        Sense.update()
+
+        if code_link:
+            update_task.log('Recovering code: %s', code_link)
+            self.set_instance_code(instance_num, code, code_link)
 
         update_task.log("Registring container %s", instance_num)
         self.register_instance(instance_num)
@@ -297,8 +307,8 @@ class Tarantool(group.Group):
         self.unregister_instance("2")
 
     def create_containers(self, password):
-        self.create_container("1", None, password, None)
-        self.create_container("2", "1", password, None)
+        self.create_container("1", None, password)
+        self.create_container("2", "1", password)
 
     def remove_containers(self):
         self.remove_container("1")
@@ -466,8 +476,7 @@ class Tarantool(group.Group):
 
     def create_container(self, instance_num,
                          other_instance_num,
-                         password,
-                         password_base64):
+                         password):
         blueprint = self.blueprint
         allocation = self.allocation
 
@@ -894,20 +903,152 @@ class Tarantool(group.Group):
                                        tls=global_env.docker_tls_config)
 
             try:
-                strm, stat = docker_obj.get_archive(instance_id, '/opt/tarantool/auth.sasldb')
+                strm, stat = docker_obj.get_archive(instance_id,
+                                                    '/etc/tarantool/config.yml')
                 bio = io.BytesIO()
                 shutil.copyfileobj(strm, bio)
                 bio.seek(0)
                 tar = tarfile.open(fileobj=bio)
 
-                fobj = tar.extractfile('auth.sasldb')
-                return base64.b64encode(gzip.compress(fobj.read()))
+                fobj = tar.extractfile('config.yml')
+                config = yaml.load(fobj)
+                if 'TARANTOOL_USER_PASSWORD' in config:
+                    return config['TARANTOOL_USER_PASSWORD']
+                return None
             except docker.errors.NotFound:
                 return None
 
         else:
             raise RuntimeError("No such container: %s", instance_id)
 
+    def get_instance_code(self, instance_num, code_link):
+        containers = self.containers
+
+        if instance_num not in containers['instances']:
+            return
+
+        instance_id = self.group_id + '_' + instance_num
+        docker_hosts = [h['addr'].split(':')[0] for h in Sense.docker_hosts()
+                        if h['status'] == 'passing']
+
+        if containers:
+            docker_host = containers['instances'][instance_num]['host']
+            docker_hosts = Sense.docker_hosts()
+
+            docker_addr = None
+            for host in docker_hosts:
+                if host['addr'].split(':')[0] == docker_host or \
+                   host['consul_host'] == docker_host:
+                    docker_addr = host['addr']
+            if not docker_addr:
+                raise RuntimeError("No such Docker host: '%s'" % docker_host)
+
+            logging.info("Getting application code for '%s' on '%s'",
+                         instance_id,
+                         docker_host)
+
+            docker_obj = docker.Client(base_url=docker_addr,
+                                       tls=global_env.docker_tls_config)
+
+            try:
+                strm, stat = docker_obj.get_archive(instance_id,
+                                                    code_link)
+                bio = io.BytesIO()
+                shutil.copyfileobj(strm, bio)
+                bio.seek(0)
+                return bio
+            except docker.errors.NotFound:
+                return None
+        else:
+            raise RuntimeError("No such container: %s", instance_id)
+
+    def get_instance_current_code(self, instance_num):
+        containers = self.containers
+
+        if instance_num not in containers['instances']:
+            return
+
+        instance_id = self.group_id + '_' + instance_num
+        docker_hosts = [h['addr'].split(':')[0] for h in Sense.docker_hosts()
+                        if h['status'] == 'passing']
+
+        if containers:
+            docker_host = containers['instances'][instance_num]['host']
+            docker_hosts = Sense.docker_hosts()
+
+            docker_addr = None
+            for host in docker_hosts:
+                if host['addr'].split(':')[0] == docker_host or \
+                   host['consul_host'] == docker_host:
+                    docker_addr = host['addr']
+            if not docker_addr:
+                raise RuntimeError("No such Docker host: '%s'" % docker_host)
+
+            logging.info("Getting link to current code ver for '%s' on '%s'",
+                         instance_id,
+                         docker_host)
+
+            docker_obj = docker.Client(base_url=docker_addr,
+                                       tls=global_env.docker_tls_config)
+
+            try:
+                strm, stat = docker_obj.get_archive(instance_id,
+                                                    '/opt/tarantool')
+                target = stat['linkTarget']
+                return target
+            except docker.errors.NotFound:
+                raise
+                return None
+        else:
+            raise RuntimeError("No such container: %s", instance_id)
+
+    def set_instance_code(self, instance_num, code, code_link):
+        tar = code
+        containers = self.containers
+
+        if instance_num not in containers['instances']:
+            return
+
+        instance_id = self.group_id + '_' + instance_num
+        docker_hosts = [h['addr'].split(':')[0] for h in Sense.docker_hosts()
+                        if h['status'] == 'passing']
+
+        if containers:
+            docker_host = containers['instances'][instance_num]['host']
+            docker_hosts = Sense.docker_hosts()
+
+            docker_addr = None
+            for host in docker_hosts:
+                if host['addr'].split(':')[0] == docker_host or \
+                   host['consul_host'] == docker_host:
+                    docker_addr = host['addr']
+            if not docker_addr:
+                raise RuntimeError("No such Docker host: '%s'" % docker_host)
+
+            logging.info("Restoring code of container '%s' on '%s'",
+                         instance_id,
+                         docker_host)
+
+            docker_obj = docker.Client(base_url=docker_addr,
+                                       tls=global_env.docker_tls_config)
+
+            status = docker_obj.put_archive(self.group_id + '_' + instance_num,
+                                            '/opt/deploy',
+                                            tar)
+            if not status:
+                raise RuntimeError("Failed to restore config for container " +
+                                   instance_id)
+
+            cmd = "ln -snf '%s' /opt/tarantool" % code_link
+            exec_id = docker_obj.exec_create(self.group_id + '_' +
+                                             instance_num, cmd)
+            docker_obj.exec_start(exec_id)
+            ret = docker_obj.exec_inspect(exec_id)
+
+            if ret['ExitCode'] != 0:
+                raise RuntimeError("Failed to update symlink to '%s'" % code_link)
+
+            docker_obj.restart(container=instance_id)
 
 
     def ensure_image(self, docker_addr):
