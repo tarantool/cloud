@@ -41,8 +41,10 @@
     tarantool_cloud_tls_server_ext_file: '{{tarantool_cloud_tls_server_dir}}/server-extfile.cnf'
     subject_alt_name: '
       {% for interface in ansible_interfaces %}
+      {% if "ansible_"+interface.replace("-","_") in hostvars[inventory_hostname] %}
       {% if "ipv4" in hostvars[inventory_hostname]["ansible_"+interface.replace("-","_")] %}
       IP:{{hostvars[inventory_hostname]["ansible_"+interface.replace("-","_")]["ipv4"]["address"]}},
+      {% endif %}
       {% endif %}
       {% endfor %} DNS:{{ansible_hostname}}, DNS:{{ansible_hostname}}.dc1.consul,'
   copy:
