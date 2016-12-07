@@ -1,8 +1,10 @@
 {
   {% if consul_server == 'true' %}
+    "server": true,
     "bootstrap_expect": 3,
+  {% else %}
+    "server": false,
   {% endif%}
-  "server": {{ "true" if consul_server else "false" }},
   "data_dir": "{{ consul_data_dir }}",
   "retry_join": [{{consul_retry_join.strip()}}],
   "check_update_interval": "0s",
