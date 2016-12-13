@@ -6,3 +6,4 @@ CONSUL_HOST: 127.0.0.1
 #CONSUL_ACL_TOKEN: 6QTrYi2InPYJyfK7e50aCw==
 #HTTP_BASIC_USERNAME: admin
 #HTTP_BASIC_PASSWORD: ilikerandompasswords
+#BACKUP_DIR: /tmp/backups

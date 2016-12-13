@@ -6,6 +6,7 @@ import docker
 import re
 import time
 import dateutil.parser
+import collections
 
 def consul_kv_to_dict(consul_kv_list):
     result = {}
@@ -33,6 +34,7 @@ class Sense(object):
 
         kv = consul_obj.kv.get('tarantool', recurse=True)[1] or []
         settings = consul_obj.kv.get('tarantool_settings', recurse=True)[1] or []
+        backups = consul_obj.kv.get('tarantool_backups', recurse=True)[1] or []
         service_names = consul_obj.catalog.services()[1].keys()
 
         services = {}
@@ -64,6 +66,7 @@ class Sense(object):
 
         global_env.kv = kv
         global_env.settings = settings
+        global_env.backups = backups
         global_env.services = services
         global_env.containers = containers
         global_env.docker_info = docker_info
@@ -148,6 +151,52 @@ class Sense(object):
                     value
 
         return groups
+
+    @classmethod
+    def backups(cls):
+        backups_kv = consul_kv_to_dict(global_env.backups)
+
+        backups = collections.defaultdict(dict)
+
+        for key, value in backups_kv.items():
+            match = re.match('tarantool_backups/(.*)/type',
+                             key)
+            if match:
+                backup_id = match.group(1)
+                backups[backup_id]['type'] = value
+
+            match = re.match('tarantool_backups/(.*)/archive_id',
+                             key)
+            if match:
+                backup_id = match.group(1)
+                backups[backup_id]['archive_id'] = value
+
+            match = re.match('tarantool_backups/(.*)/creation_time',
+                             key)
+            if match:
+                backup_id = match.group(1)
+                backups[backup_id]['creation_time'] = dateutil.parser.parse(value)
+
+            match = re.match('tarantool_backups/(.*)/storage',
+                             key)
+            if match:
+                backup_id = match.group(1)
+                backups[backup_id]['storage'] = value
+
+            match = re.match('tarantool_backups/(.*)/size',
+                             key)
+            if match:
+                backup_id = match.group(1)
+                backups[backup_id]['size'] = int(value)
+
+            match = re.match('tarantool_backups/(.*)/mem_used',
+                             key)
+            if match:
+                backup_id = match.group(1)
+                backups[backup_id]['mem_used'] = float(value)
+
+
+        return dict(backups)
 
     @classmethod
     def services(cls):

@@ -512,6 +512,215 @@ def upgrade_command(host, group_id, auth, verbose):
     if not verbose:
         print('')
 
+def backup_command(host, group_id, auth, verbose):
+    args = {'async': True}
+
+    url = 'http://%s/api/groups/%s/backups' % (without_http_prefix(host),
+                                               group_id)
+
+    try:
+        _, data_str = http_post(url, args, auth)
+    except urllib2.HTTPError, err:
+        if err.code == 500:
+            data = json.loads(err.read())
+            print("Failed to back up: %s" % data['message'])
+            sys.exit(1)
+        if err.code == 401:
+            print("Authorization required")
+            sys.exit(1)
+        else:
+            raise
+
+    data = json.loads(data_str)
+
+    task_id = data['task_id']
+    group_id = data['id']
+
+    status = "running"
+    index = 0
+    while status == "running":
+        url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+        args = {"index": index}
+        try:
+            _, data_str = http_get(url, args, auth)
+        except urllib2.HTTPError, err:
+            if err.code == 500:
+                data = json.loads(err.read())
+                print("Failed to back up: %s" % data['message'])
+                sys.exit(1)
+            if err.code == 401:
+                print("Authorization required")
+                sys.exit(1)
+            else:
+                raise
+        data = json.loads(data_str)
+        index = data['index']
+        status = data['status']
+        for log in data['logs']:
+            if verbose:
+                print(log['message'])
+            else:
+                print('.', end='')
+                sys.stdout.flush()
+
+        if status == "error":
+            print("Error: %s" % data['message'])
+            sys.exit(1)
+
+    if not verbose:
+        print('')
+
+    print(group_id)
+
+
+def restore_command(host, group_id, backup_id, auth, verbose):
+    args = {'async': True,
+            'backup_id': backup_id}
+
+    url = 'http://%s/api/groups/%s' % (without_http_prefix(host),
+                                       group_id)
+
+    try:
+        _, data_str = http_put(url, args, auth)
+    except urllib2.HTTPError, err:
+        if err.code == 500:
+            data = json.loads(err.read())
+            print("Failed to restore: %s" % data['message'])
+            sys.exit(1)
+        if err.code == 404:
+            print("No such group: '%s'" % group_id)
+            sys.exit(1)
+        if err.code == 401:
+            print("Authorization required")
+            sys.exit(1)
+        else:
+            raise
+
+    data = json.loads(data_str)
+    task_id = data['task_id']
+
+    status = "running"
+    index = 0
+    while status == "running":
+        url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+        args = {"index": index}
+        try:
+            _, data_str = http_get(url, args, auth)
+        except urllib2.HTTPError, err:
+            if err.code == 401:
+                print("Authorization required")
+                sys.exit(1)
+            else:
+                raise
+        data = json.loads(data_str)
+        index = data['index']
+        status = data['status']
+
+        for log in data['logs']:
+            if verbose:
+                print(log['message'])
+            else:
+                print('.', end='')
+                sys.stdout.flush()
+
+        if status == "error":
+            print("Error: %s" % data['message'])
+            sys.exit(1)
+
+    if not verbose:
+        print('')
+
+def backups_ls_command(host, is_quiet, auth):
+    url = 'http://%s/api/backups' % without_http_prefix(host)
+
+    try:
+        _, data_str = http_get(url, None, auth)
+    except urllib2.HTTPError, err:
+        if err.code == 401:
+            print("Authorization required")
+            sys.exit(1)
+        else:
+            raise
+
+    data = json.loads(data_str)
+
+    result = []
+    for backup_id, backup in data.items():
+        result.append({
+            'backup_id': backup_id,
+            'type': backup['type'],
+            'size': "{0:.3f}".format(backup['size'] / 1024 ** 3),
+            'mem_used': "{0:.3f}".format(backup['mem_used']),
+            'time': backup['creation_time'].split('.')[0]
+        })
+
+    result = sorted(result, key=lambda x: x['time'], reverse=True)
+
+    header = [
+        ('backup_id', 'BACKUP'),
+        ('type', 'TYPE'),
+        ('size', 'SIZE'),
+        ('mem_used', 'MEM USED'),
+        ('time', 'TIME')
+    ]
+
+    if not is_quiet:
+        print_table(header, result)
+    else:
+        groups = set([i['backup_id'] for i in result])
+        print('\n'.join(groups))
+
+def backups_rm_command(host, backup_id_list, auth, verbose):
+    for backup_id in backup_id_list:
+        url = 'http://%s/api/backups/%s' % (without_http_prefix(host), backup_id)
+        try:
+            _, data_str = http_delete(url, {'async': True}, auth)
+        except urllib2.HTTPError, err:
+            if err.code == 500:
+                data = json.loads(err.read())
+                print("Failed remove backup: %s" % data['message'])
+                sys.exit(1)
+            if err.code == 404:
+                print("No such backup: '%s'" % backup_id)
+                sys.exit(1)
+            elif err.code == 401:
+                print("Authorization required")
+                sys.exit(1)
+            else:
+                raise
+
+        data = json.loads(data_str)
+        task_id = data['task_id']
+
+        status = "running"
+        index = 0
+        while status == "running":
+            url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+            args = {"index": index}
+            try:
+                _, data_str = http_get(url, args, auth)
+            except urllib2.HTTPError, err:
+                if err.code == 401:
+                    print("Authorization required")
+                    sys.exit(1)
+                else:
+                    raise
+            data = json.loads(data_str)
+            index = data['index']
+            status = data['status']
+            for log in data['logs']:
+                if verbose:
+                    print(log['message'])
+                else:
+                    print('.', end='')
+                    sys.stdout.flush()
+
+            if status == "error":
+                print("Error: %s" % data['message'])
+                sys.exit(1)
+
+    if not verbose:
+        print('')
 
 
 def main():
@@ -614,6 +823,38 @@ def main():
     deploy_parser.add_argument('path',
                                 help='path to deploy from')
 
+    backup_parser = subparsers.add_parser(
+        'backup', help='backup an existing group')
+    backup_parser.add_argument('group_id',
+                               help='group ID to backup')
+
+    restore_parser = subparsers.add_parser(
+        'restore', help='restore an existing group from backup')
+    restore_parser.add_argument('group_id',
+                                help='group ID to restore')
+    restore_parser.add_argument('backup_id',
+                                help='backup ID to restore from')
+
+    backup_parser = subparsers.add_parser(
+        'backups', help='manage backups')
+
+    backup_subparsers = backup_parser.add_subparsers(
+        title="commands",
+        dest="backup_subparser_name")
+
+    backup_ls_parser = backup_subparsers.add_parser('ls')
+    backup_ls_parser.add_argument(
+        '-q', '--quiet',
+        action='store_true',
+        help='only show backup IDs')
+
+    backup_rm_parser = backup_subparsers.add_parser(
+        'rm', help='remove one or more backups')
+    backup_rm_parser.add_argument(
+        'backup_id',
+        nargs='+',
+        help='backup to remove')
+
     args = parser.parse_args()
 
     auth = None
@@ -653,7 +894,14 @@ def main():
         update_command(host, args.group_id, None,
                        None, None, args.path, False,
                        auth, args.verbose)
-
+    elif args.subparser_name == 'backup':
+        backup_command(host, args.group_id, auth, args.verbose)
+    elif args.subparser_name == 'restore':
+        restore_command(host, args.group_id, args.backup_id, auth, args.verbose)
+    elif args.subparser_name == 'backups' and args.backup_subparser_name == 'ls':
+        backups_ls_command(host, args.quiet, auth)
+    elif args.subparser_name == 'backups' and args.backup_subparser_name == 'rm':
+        backups_rm_command(host, args.backup_id, auth, args.verbose)
 
 if __name__ == '__main__':
     main()

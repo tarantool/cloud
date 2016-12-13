@@ -19,6 +19,7 @@ import docker
 import argparse
 import yaml
 import ip_pool
+import backup_storage
 
 import werkzeug
 
@@ -50,6 +51,11 @@ def abort_if_instance_doesnt_exist(instance_id):
             return
 
     abort(404, message="instance {} doesn't exist".format(instance_id))
+
+
+def abort_if_backup_doesnt_exist(backup_id):
+    if backup_id not in sense.Sense.backups():
+        abort(404, message="backup {} doesn't exist".format(backup_id))
 
 
 def state_to_dict(state_name):
@@ -87,6 +93,20 @@ def instance_to_dict(instance_id):
             'host': host,
             'state': state_to_dict(state),
             'mem_used': mem_used}
+
+
+def backup_to_dict(backup_id):
+    backups = sense.Sense.backups()
+
+    backup = backups[backup_id]
+
+    return {'id': backup_id,
+            'archive_id': backup['archive_id'],
+            'type': backup['type'],
+            'creation_time': backup['creation_time'].isoformat(),
+            'size': backup['size'],
+            'mem_used': backup['mem_used'],
+            'storage': backup['storage']}
 
 
 def group_to_dict(group_id):
@@ -201,11 +221,16 @@ class Group(Resource):
                             type=werkzeug.datastructures.FileStorage,
                             location='files')
         parser.add_argument('config_is_dir', type=bool, default=False)
-
+        parser.add_argument('backup_id', type=str)
         args = parser.parse_args()
 
         blueprints = sense.Sense.blueprints()
         group = blueprints[group_id]
+
+        if not global_env.backup_dir:
+            abort(500, message="Backup dir not specified in server config")
+
+        storage = backup_storage.FilesystemBackupStorage(global_env.backup_dir)
 
         if group['type'] == 'memcached':
             memc = memcached.Memcached.get(group_id)
@@ -219,6 +244,8 @@ class Group(Resource):
                          args['password'],
                          args['docker_image_name'],
                          args['heal'],
+                         args['backup_id'],
+                         storage,
                          update_task)
 
         elif group['type'] == 'tarantino':
@@ -260,6 +287,8 @@ class Group(Resource):
                          config_filename,
                          args['docker_image_name'],
                          args['heal'],
+                         args['backup_id'],
+                         storage,
                          update_task)
         else:
             raise RuntimeError("Unknown group type: %s" % group['type'])
@@ -365,17 +394,119 @@ class TaskList(Resource):
         return result
 
 
+class Backup(Resource):
+    def get(self, backup_id):
+        abort_if_backup_doesnt_exist(backup_id)
+        result = {}
+        result[backup_id] = backup_to_dict(backup_id)
+        return result
+
+    def delete(self, backup_id):
+        parser = reqparse.RequestParser()
+        parser.add_argument('async', type=bool, default=False)
+        args = parser.parse_args()
+
+        abort_if_backup_doesnt_exist(backup_id)
+
+        delete_task = backup_storage.DeleteTask(backup_id)
+        TASKS[delete_task.task_id] = delete_task
+
+        if not global_env.backup_dir:
+            abort(500, message="Backup dir not specified in server config")
+
+        storage = backup_storage.FilesystemBackupStorage(global_env.backup_dir)
+        gevent.spawn(storage.unregister_backup, backup_id, delete_task)
+
+        if args['async']:
+            result = {'id': backup_id,
+                      'task_id': delete_task.task_id}
+            return result, 202
+        else:
+            delete_task.wait_for_completion()
+            return '', 204
+
+
+class BackupList(Resource):
+    def get(self):
+        backups = sense.Sense.backups()
+
+        result = {}
+        for backup_id in backups.keys():
+            result[backup_id] = backup_to_dict(backup_id)
+
+        return result
+
+
+class InstanceBackup(Resource):
+    def get(self, group_id, backup_id):
+        return {}
+
+
+class InstanceBackupList(Resource):
+    def get(self):
+        return {}
+
+    def post(self, group_id):
+        abort_if_group_doesnt_exist(group_id)
+
+        parser = reqparse.RequestParser()
+        parser.add_argument('async', type=bool, default=False)
+
+        args = parser.parse_args()
+
+        blueprints = sense.Sense.blueprints()
+        group = blueprints[group_id]
+
+        args = parser.parse_args()
+        backup_id = uuid.uuid4().hex
+
+        if not global_env.backup_dir:
+            abort(500, message="Backup dir not specified in server config")
+
+        storage = backup_storage.FilesystemBackupStorage(global_env.backup_dir)
+
+        if group['type'] == 'memcached':
+            backup_task = memcached.BackupTask(group_id, backup_id)
+            TASKS[backup_task.task_id] = backup_task
+            memc = memcached.Memcached.get(group_id)
+
+            gevent.spawn(memc.backup,
+                         backup_task,
+                         storage)
+        elif group['type'] == 'tarantool':
+            backup_task = memcached.BackupTask(group_id, backup_id)
+            TASKS[backup_task.task_id] = backup_task
+            tar = tarantool.Tarantool.get(group_id)
+
+            gevent.spawn(tar.backup,
+                         backup_task,
+                         storage)
+        else:
+            raise RuntimeError('Instance type unsupported: %s' % args['type'])
+
+        if args['async']:
+            result = {'id': backup_task.backup_id,
+                      'task_id': backup_task.task_id}
+            return result, 202
+
+        else:
+            backup_task.wait_for_completion()
+            return backup_to_dict(backup_id), 201
+
+
 class StateList(Resource):
     def get(self):
         return {'1': {'id': '1', 'name': 'OK', 'type': 'passing'},
                 '2': {'id': '2', 'name': 'Degraded', 'type': 'warning'},
                 '3': {'id': '3', 'name': 'Down', 'type': 'critical'}}
 
+
 class Instance(Resource):
     def get(self, instance_id):
         abort_if_instance_doesnt_exist(instance_id)
 
         return instance_to_dict(instance_id)
+
 
 class InstanceList(Resource):
     def get(self):
@@ -390,8 +521,6 @@ class InstanceList(Resource):
 
         return result
 
-
-
 def setup_routes():
     api.add_resource(GroupList, '/api/groups')
     api.add_resource(Group, '/api/groups/<group_id>')
@@ -399,11 +528,18 @@ def setup_routes():
     api.add_resource(InstanceList, '/api/instances')
     api.add_resource(Instance, '/api/instances/<instance_id>')
 
+    api.add_resource(InstanceBackupList,
+                     '/api/groups/<group_id>/backups')
+    api.add_resource(InstanceBackup,
+                     '/api/groups/<group_id>/backups/<backup_id>')
+
     api.add_resource(StateList, '/api/states')
 
     api.add_resource(TaskList, '/api/tasks')
     api.add_resource(Task, '/api/tasks/<task_id>')
 
+    api.add_resource(BackupList, '/api/backups')
+    api.add_resource(Backup, '/api/backups/<backup_id>')
 
 @app.route('/servers')
 def list_servers():
@@ -563,7 +699,8 @@ def get_config(config_file):
             'CONSUL_ACL_TOKEN', 'HTTP_BASIC_USERNAME',
             'HTTP_BASIC_PASSWORD', 'LISTEN_PORT',
             'IPALLOC_RANGE', 'DOCKER_NETWORK',
-            'CREATE_NETWORK_AUTOMATICALLY', 'GATEWAY_IP']
+            'CREATE_NETWORK_AUTOMATICALLY', 'GATEWAY_IP',
+            'BACKUP_DIR']
 
     for opt in opts:
         if opt in os.environ:
@@ -619,6 +756,10 @@ def main():
     if 'CREATE_NETWORK_AUTOMATICALLY' in cfg:
         global_env.default_network_settings['create_automatically'] = True
 
+    if 'BACKUP_DIR' in cfg:
+        if not os.path.exists(cfg['BACKUP_DIR']):
+            print("Backup dir '%s' doesn't exist" % cfg['BACKUP_DIR'])
+        global_env.backup_dir = cfg['BACKUP_DIR']
 
     docker_tls_config = None
     if docker_client_cert or docker_server_cert:

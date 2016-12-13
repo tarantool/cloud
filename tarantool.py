@@ -84,23 +84,24 @@ class Tarantool(group.Group):
 
             Sense.update()
 
-            memc = Tarantool(global_env.consul_host, group_id)
+            tar = Tarantool(global_env.consul_host, group_id)
 
             create_task.log("Allocating instance to physical nodes")
 
-            memc.allocate()
+            tar.allocate()
             Sense.update()
 
             create_task.log("Registering services")
-            memc.register()
+            tar.register()
             Sense.update()
 
             create_task.log("Creating containers")
-            memc.create_containers(password)
+            tar.create_containers(password)
             Sense.update()
 
             create_task.log("Enabling replication")
-            memc.enable_replication()
+            tar.wait_for_instances(create_task)
+            tar.enable_replication()
 
             create_task.log("Completed creating group")
 
@@ -111,7 +112,7 @@ class Tarantool(group.Group):
 
             raise
 
-        return memc
+        return tar
 
     def delete(self, delete_task):
         try:
@@ -160,7 +161,7 @@ class Tarantool(group.Group):
             raise
 
     def update(self, name, memsize, password, config_data, config_filename,
-               docker_image_name, heal, update_task):
+               docker_image_name, heal, backup_id, storage, update_task):
         try:
             if heal:
                 self.heal(update_task)
@@ -187,6 +188,9 @@ class Tarantool(group.Group):
 
             if docker_image_name:
                 self.upgrade(update_task)
+
+            if backup_id:
+                self.restore(backup_id, storage, update_task)
 
             Sense.update()
             update_task.set_status(task.STATUS_SUCCESS)
@@ -309,6 +313,315 @@ class Tarantool(group.Group):
         self.unregister_instance("1")
         self.unregister_instance("2")
 
+    def backup(self, backup_task, storage):
+        services = self.services
+        backup_id = backup_task.backup_id
+        group_id = self.group_id
+
+        backup_task.log("Backing up group '%s'", group_id)
+
+        instance_num = '1'
+
+        allocation = self.allocation
+        instance_id = self.group_id + '_' + instance_num
+        docker_host = allocation['instances'][instance_num]['host']
+        docker_hosts = Sense.docker_hosts()
+
+        docker_addr = None
+        for host in docker_hosts:
+            if host['addr'].split(':')[0] == docker_host or \
+               host['consul_host'] == docker_host:
+                docker_addr = host['addr']
+
+        if not docker_addr:
+            raise RuntimeError("No such Docker host: '%s'" % docker_host)
+
+        docker_obj = docker.Client(base_url=docker_addr,
+                                   tls=global_env.docker_tls_config)
+
+        cmd = 'ls /var/lib/tarantool'
+        exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
+                                         cmd)
+        out = docker_obj.exec_start(exec_id)
+        ret = docker_obj.exec_inspect(exec_id)
+
+        if ret['ExitCode'] != 0:
+            raise RuntimeError("Failed to list snapshots for container " +
+                               instance_id)
+
+        files = list(filter(None, out.decode('utf-8').split('\n')))
+        snapshots = [f for f in files if f.endswith('.snap')]
+        snapshot_lsns = sorted([os.path.splitext(s)[0] for s in snapshots])
+        xlogs = [f for f in files if f.endswith('.xlog')]
+        xlog_lsns = sorted([os.path.splitext(s)[0] for s in xlogs])
+
+        if not snapshot_lsns:
+            raise RuntimeError("There are no snapshots to backup")
+
+        latest_snapshot_lsn = snapshot_lsns[-1]
+
+        older_xlogs = list(filter(
+            lambda x: x <= latest_snapshot_lsn, xlog_lsns))
+        older_xlog = older_xlogs[-1]
+
+        newer_xlogs = list(filter(
+            lambda x: x > latest_snapshot_lsn, xlog_lsns))
+
+        xlogs_to_backup = [older_xlog] + newer_xlogs
+
+        files_to_backup = [latest_snapshot_lsn + '.snap']
+        files_to_backup += [xlog + '.xlog' for xlog in xlogs_to_backup]
+
+        backup_task.log("Backing up data: %s", ', '.join(files_to_backup))
+
+        cmd = 'ls /opt/deploy'
+        exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
+                                         cmd)
+        out = docker_obj.exec_start(exec_id)
+        ret = docker_obj.exec_inspect(exec_id)
+
+        if ret['ExitCode'] != 0:
+            raise RuntimeError("Failed to list snapshots for container " +
+                               instance_id)
+
+        code_directories = list(filter(None, out.decode('utf-8').split('\n')))
+
+        print("DIRS: ", code_directories)
+        if code_directories:
+            backup_task.log("Backing up code: %s", ', '.join(code_directories))
+        else:
+            backup_task.log("No code to back up")
+
+        tmp_backup_dir = '/var/lib/tarantool/backup-' + uuid.uuid4().hex
+
+        for dirname in ["%s", "%s/code", "%s/data"]:
+            cmd = "mkdir -p '%s'" % (dirname % tmp_backup_dir)
+            exec_id = docker_obj.exec_create(
+                self.group_id + '_' + instance_num, cmd)
+            out = docker_obj.exec_start(exec_id)
+            ret = docker_obj.exec_inspect(exec_id)
+
+            if ret['ExitCode'] != 0:
+                raise RuntimeError(
+                    "Failed to create temp dir '%s' for container '%s'" %
+                    (dirname % tmp_backup_dir, instance_id))
+
+        for file_to_backup in files_to_backup:
+            cmd = "ln /var/lib/tarantool/%s %s/data/%s" % (
+                file_to_backup, tmp_backup_dir, file_to_backup)
+            exec_id = docker_obj.exec_create(
+                self.group_id + '_' + instance_num, cmd)
+            out = docker_obj.exec_start(exec_id)
+            ret = docker_obj.exec_inspect(exec_id)
+
+            if ret['ExitCode'] != 0:
+                raise RuntimeError(
+                    "Failed to hardlink data file: " + out.decode('utf-8'))
+
+        for code_directory in code_directories:
+            cmd = "cp -a /opt/deploy/%s %s/code/%s" % (
+                code_directory, tmp_backup_dir, code_directory)
+            exec_id = docker_obj.exec_create(
+                self.group_id + '_' + instance_num, cmd)
+            out = docker_obj.exec_start(exec_id)
+            ret = docker_obj.exec_inspect(exec_id)
+
+            if ret['ExitCode'] != 0:
+                raise RuntimeError(
+                    "Failed copy code dir: " + out.decode('utf-8'))
+
+        cmd = "cp -dp /opt/tarantool %s/current" % tmp_backup_dir
+        exec_id = docker_obj.exec_create(
+            self.group_id + '_' + instance_num, cmd)
+        out = docker_obj.exec_start(exec_id)
+        ret = docker_obj.exec_inspect(exec_id)
+
+        if ret['ExitCode'] != 0:
+            raise RuntimeError(
+                "Failed copy code symlink: " + out.decode('utf-8'))
+
+        strm, _ = docker_obj.get_archive(instance_id, tmp_backup_dir+'/.')
+        archive_id, size = storage.put_archive(strm)
+
+        cmd = "rm -rf /var/lib/tarantool/backup-*"
+        exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
+                                         cmd)
+        out = docker_obj.exec_start(exec_id)
+        ret = docker_obj.exec_inspect(exec_id)
+
+        if ret['ExitCode'] != 0:
+            raise RuntimeError(
+                "Failed to remove temp backup dir for container " +
+                instance_id)
+
+        mem_used = services['instances'][instance_num]['mem_used']
+        storage.register_backup(backup_id, archive_id, 'memcached',
+                                size, mem_used)
+
+        Sense.update()
+
+        backup_task.set_status(task.STATUS_SUCCESS)
+
+    def restore(self, backup_id, storage, restore_task):
+        blueprint = self.blueprint
+        services = self.services
+        group_id = self.group_id
+
+        restore_task.log("Restoring group '%s'", group_id)
+
+        backup = Sense.backups()[backup_id]
+        archive_id = backup['archive_id']
+        mem_used = backup['mem_used']
+
+        try:
+            for instance_num in ('1', '2'):
+                allocation = self.allocation
+                instance_id = self.group_id + '_' + instance_num
+                docker_host = allocation['instances'][instance_num]['host']
+                docker_hosts = Sense.docker_hosts()
+
+                restore_task.log("Restoring instance: '%s'", instance_id)
+
+                docker_addr = None
+                for host in docker_hosts:
+                    if host['addr'].split(':')[0] == docker_host or \
+                       host['consul_host'] == docker_host:
+                        docker_addr = host['addr']
+
+                if not docker_addr:
+                    raise RuntimeError("No such Docker host: '%s'" % docker_host)
+
+                docker_obj = docker.Client(base_url=docker_addr,
+                                           tls=global_env.docker_tls_config)
+
+                if mem_used > blueprint['memsize']:
+                    err = ("Backed up instance used {0:.3f} GiB of RAM, but " +
+                           "instance {} only has {0:.3f} GiB max").format(
+                               mem_used, group_id, blueprint['memsize'])
+                    restore_task.set_status(task.STATUS_CRITICAL, err)
+                    return
+
+                tmp_restore_dir = '/var/lib/tarantool/restore-' + uuid.uuid4().hex
+
+                cmd = "mkdir '%s'" % tmp_restore_dir
+                exec_id = docker_obj.exec_create(
+                    self.group_id + '_' + instance_num, cmd)
+                out = docker_obj.exec_start(exec_id)
+                ret = docker_obj.exec_inspect(exec_id)
+
+                if ret['ExitCode'] != 0:
+                    raise RuntimeError(
+                        "Failed to create temp restore dir for container " +
+                        instance_id + ": " + out.decode('utf-8'))
+
+                stream = storage.get_archive(archive_id)
+
+                docker_obj.put_archive(instance_id, tmp_restore_dir, stream)
+
+                cmd = "sh -c 'rm -rf /var/lib/tarantool/*.snap'"
+                exec_id = docker_obj.exec_create(
+                    self.group_id + '_' + instance_num, cmd)
+                out = docker_obj.exec_start(exec_id)
+                ret = docker_obj.exec_inspect(exec_id)
+
+                if ret['ExitCode'] != 0:
+                    raise RuntimeError(
+                        "Failed to remove existing snap files of " +
+                        instance_id + ": " + out.decode('utf-8'))
+
+                cmd = "sh -c 'rm -rf /var/lib/tarantool/*.xlog'"
+                exec_id = docker_obj.exec_create(
+                    self.group_id + '_' + instance_num, cmd)
+                out = docker_obj.exec_start(exec_id)
+                ret = docker_obj.exec_inspect(exec_id)
+
+                if ret['ExitCode'] != 0:
+                    raise RuntimeError(
+                        "Failed to remove existing xlog files of " +
+                        instance_id + ": " + out.decode('utf-8'))
+
+                cmd = "ln -snf / /opt/tarantool"
+                exec_id = docker_obj.exec_create(
+                    self.group_id + '_' + instance_num, cmd)
+                out = docker_obj.exec_start(exec_id)
+                ret = docker_obj.exec_inspect(exec_id)
+
+                if ret['ExitCode'] != 0:
+                    raise RuntimeError(
+                        "Failed to re-point working dir " +
+                        instance_id + ": " + out.decode('utf-8'))
+
+                cmd = "sh -c 'rm -rf /opt/deploy/*'"
+                exec_id = docker_obj.exec_create(
+                    self.group_id + '_' + instance_num, cmd)
+                out = docker_obj.exec_start(exec_id)
+                ret = docker_obj.exec_inspect(exec_id)
+
+                if ret['ExitCode'] != 0:
+                    raise RuntimeError(
+                        "Failed to remove existing code files of " +
+                        instance_id + ": " + out.decode('utf-8'))
+
+                cmd = "sh -c 'mv %s/data/* /var/lib/tarantool'" % \
+                      tmp_restore_dir
+                exec_id = docker_obj.exec_create(
+                    self.group_id + '_' + instance_num, cmd)
+                out = docker_obj.exec_start(exec_id)
+                ret = docker_obj.exec_inspect(exec_id)
+
+                if ret['ExitCode'] != 0:
+                    raise RuntimeError(
+                        "Failed to restore data of" +
+                        instance_id + ": " + out.decode('utf-8'))
+
+                cmd = "sh -c 'mv %s/code/* /opt/deploy'" % \
+                      tmp_restore_dir
+                exec_id = docker_obj.exec_create(
+                    self.group_id + '_' + instance_num, cmd)
+                out = docker_obj.exec_start(exec_id)
+                ret = docker_obj.exec_inspect(exec_id)
+
+                if ret['ExitCode'] != 0:
+                    raise RuntimeError(
+                        "Failed to restore data of" +
+                        instance_id + ": " + out.decode('utf-8'))
+
+                _, stat = docker_obj.get_archive(instance_id,
+                                                 '%s/current' % tmp_restore_dir)
+                code_link = stat['linkTarget']
+
+                cmd = "ln -snf '%s' /opt/tarantool" % code_link
+                exec_id = docker_obj.exec_create(
+                    self.group_id + '_' + instance_num, cmd)
+                out = docker_obj.exec_start(exec_id)
+                ret = docker_obj.exec_inspect(exec_id)
+
+                if ret['ExitCode'] != 0:
+                    raise RuntimeError(
+                        "Failed to restore current code link of" +
+                        instance_id + ": " + out.decode('utf-8'))
+
+                cmd = "rm -rf '%s'" % tmp_restore_dir
+                exec_id = docker_obj.exec_create(
+                    self.group_id + '_' + instance_num, cmd)
+                out = docker_obj.exec_start(exec_id)
+                ret = docker_obj.exec_inspect(exec_id)
+
+                if ret['ExitCode'] != 0:
+                    raise RuntimeError(
+                        "Failed to remove tmp restore dir of " +
+                        instance_id + ": " + out.decode('utf-8'))
+
+                restore_task.log("Restarting instance: '%s'", instance_id)
+                docker_obj.restart(container=instance_id)
+
+            restore_task.log("Enabling replication")
+            self.wait_for_instances(restore_task)
+            self.enable_replication()
+        except Exception as ex:
+            logging.exception("Failed to restore backup '%s'", group_id)
+            restore_task.set_status(task.STATUS_CRITICAL, str(ex))
+
     def create_containers(self, password):
         self.create_container("1", None, password)
         self.create_container("2", "1", password)
@@ -326,6 +639,57 @@ class Tarantool(group.Group):
 
         kv.delete("tarantool/%s/blueprint" % self.group_id,
                   recurse=True)
+
+    def wait_for_instances(self, wait_task):
+        port = 3301
+
+        blueprint = self.blueprint
+        allocation = self.allocation
+
+        for instance_num in allocation['instances']:
+            other_instances = \
+                set(allocation['instances'].keys()) - set([instance_num])
+
+            addr = blueprint['instances'][instance_num]['addr']
+            other_addrs = [blueprint['instances'][i]['addr']
+                           for i in other_instances]
+            docker_host = allocation['instances'][instance_num]['host']
+            docker_hosts = Sense.docker_hosts()
+            instance_id = self.group_id + '_' + instance_num
+
+            wait_task.log("Waiting for '%s' to go up. It may take time to " +
+                          "load data from disk.", instance_id)
+
+            docker_addr = None
+            for host in docker_hosts:
+                if host['addr'].split(':')[0] == docker_host or \
+                   host['consul_host'] == docker_host:
+                    docker_addr = host['addr']
+
+            docker_obj = docker.Client(base_url=docker_addr,
+                                       tls=global_env.docker_tls_config)
+
+            cmd = "tarantool_is_up"
+            attempts = 0
+            while True:
+                exec_id = docker_obj.exec_create(instance_id,
+                                                 cmd)
+                stream = docker_obj.exec_start(exec_id, stream=True)
+
+                for line in stream:
+                    logging.info("Exec: %s", str(line))
+
+                ret = docker_obj.exec_inspect(exec_id)
+
+                if ret['ExitCode'] == 0:
+                    break
+
+                wait_task.log("Waiting for '%s' to go up. Attempt %d.",
+                              instance_id, attempts)
+
+                time.sleep(1)
+                attempts += 1
+
 
     def enable_replication(self):
         port = 3301
