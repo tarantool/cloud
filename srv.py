@@ -227,10 +227,10 @@ class Group(Resource):
         blueprints = sense.Sense.blueprints()
         group = blueprints[group_id]
 
-        if not global_env.backup_dir:
-            abort(500, message="Backup dir not specified in server config")
+        if not global_env.backup_storage:
+            abort(500, message="Backup storage not configured")
 
-        storage = backup_storage.FilesystemBackupStorage(global_env.backup_dir)
+        storage = global_env.backup_storage
 
         if group['type'] == 'memcached':
             memc = memcached.Memcached.get(group_id)
@@ -411,10 +411,10 @@ class Backup(Resource):
         delete_task = backup_storage.DeleteTask(backup_id)
         TASKS[delete_task.task_id] = delete_task
 
-        if not global_env.backup_dir:
-            abort(500, message="Backup dir not specified in server config")
+        if not global_env.backup_storage:
+            abort(500, message="Backup storage not configured")
 
-        storage = backup_storage.FilesystemBackupStorage(global_env.backup_dir)
+        storage = global_env.backup_storage
         gevent.spawn(storage.unregister_backup, backup_id, delete_task)
 
         if args['async']:
@@ -460,10 +460,10 @@ class InstanceBackupList(Resource):
         args = parser.parse_args()
         backup_id = uuid.uuid4().hex
 
-        if not global_env.backup_dir:
-            abort(500, message="Backup dir not specified in server config")
+        if not global_env.backup_storage:
+            abort(500, message="Backup storage not configured")
 
-        storage = backup_storage.FilesystemBackupStorage(global_env.backup_dir)
+        storage = global_env.backup_storage
 
         if group['type'] == 'memcached':
             backup_task = memcached.BackupTask(group_id, backup_id)
@@ -700,7 +700,8 @@ def get_config(config_file):
             'HTTP_BASIC_PASSWORD', 'LISTEN_PORT',
             'IPALLOC_RANGE', 'DOCKER_NETWORK',
             'CREATE_NETWORK_AUTOMATICALLY', 'GATEWAY_IP',
-            'BACKUP_DIR']
+            'BACKUP_STORAGE_TYPE', 'BACKUP_BASE_DIR',
+            'BACKUP_HOST', 'BACKUP_IDENTITY', 'BACKUP_USER']
 
     for opt in opts:
         if opt in os.environ:
@@ -756,10 +757,13 @@ def main():
     if 'CREATE_NETWORK_AUTOMATICALLY' in cfg:
         global_env.default_network_settings['create_automatically'] = True
 
-    if 'BACKUP_DIR' in cfg:
-        if not os.path.exists(cfg['BACKUP_DIR']):
-            print("Backup dir '%s' doesn't exist" % cfg['BACKUP_DIR'])
-        global_env.backup_dir = cfg['BACKUP_DIR']
+    if 'BACKUP_STORAGE_TYPE' in cfg:
+        backup_config = {'base_dir': cfg.get('BACKUP_BASE_DIR', None),
+                         'host': cfg.get('BACKUP_HOST', None),
+                         'user': cfg.get('BACKUP_USER', None),
+                         'identity': cfg.get('BACKUP_IDENTITY', None)}
+        global_env.backup_storage = backup_storage.create(
+            cfg['BACKUP_STORAGE_TYPE'], backup_config)
 
     docker_tls_config = None
     if docker_client_cert or docker_server_cert:

@@ -10,6 +10,8 @@ import datetime
 import task
 import sense
 import logging
+import fabric.api
+import tempfile
 
 CHUNK_SIZE = 1024 ** 2
 
@@ -115,12 +117,20 @@ class BackupStorage(object):
             raise
 
 
-
 class FilesystemBackupStorage(BackupStorage):
     backup_storage_type = "filesystem"
 
-    def __init__(self, base_dir):
-        self.base_dir = base_dir
+    def __init__(self, config):
+        if 'base_dir' not in config:
+            raise RuntimeError(
+                "FilesystemBackupStorage needs 'base_dir' in config")
+
+        if not os.path.exists(config['base_dir']):
+            raise RuntimeError(
+                "FilesystemBackupStorage needs '%s' to exist" %
+                config['base_dir'])
+
+        self.base_dir = config['base_dir']
 
     def put_archive(self, stream):
         archive_id = uuid.uuid4().hex
@@ -160,3 +170,115 @@ class FilesystemBackupStorage(BackupStorage):
             os.remove(fullpath)
         except OSError:
             pass
+
+
+class SSHBackupStorage(BackupStorage):
+    backup_storage_type = "ssh"
+
+    def __init__(self, config):
+        if 'base_dir' not in config:
+            raise RuntimeError(
+                "SSHBackupStorage needs 'base_dir' in config")
+
+        if 'host' not in config:
+            raise RuntimeError(
+                "SSHBackupStorage needs 'host' in config")
+
+        self.base_dir = config['base_dir']
+        self.user = config.get('user', None)
+        self.identity = config.get('identity', None)
+        self.host = config['host']
+        self.password = config.get('password', None)
+
+    def put_archive(self, stream):
+        with tempfile.TemporaryFile(mode='wb+') as tmp_file:
+            sha256 = hashlib.new('sha256')
+
+            # Files must have predictable hashes, so timestamp has to be
+            # set to a constant. It is written to the gzip stream.
+            with gzip.GzipFile(fileobj=tmp_file, mode='wb', mtime=0) as fobj:
+                for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
+                    fobj.write(chunk)
+
+            tmp_file.seek(0)
+            total_size = 0
+            for chunk in iter(lambda: tmp_file.read(CHUNK_SIZE), b""):
+                total_size += len(chunk)
+                sha256.update(chunk)
+            tmp_file.seek(0)
+            digest = sha256.hexdigest()
+
+            settings = {'abort_on_prompts': False, 'host_string': self.host,
+                        'abort_exception': RuntimeError, 'remote_interrupt': False,
+                        'always_use_pty': False, 'warn_only': True}
+            if self.user:
+                settings['user'] = self.user
+            if self.identity:
+                settings['key_filename'] = self.identity
+            if self.password:
+                settings['password'] = self.password
+
+            with fabric.api.settings(**settings):
+                fullpath = os.path.join(self.base_dir, digest + '.tar.gz')
+                status = fabric.api.put(local_path = tmp_file,
+                                        remote_path = fullpath)
+            if not status.succeeded:
+                raise RuntimeError("Failed to upload archive: '%s'" %
+                                   fullpath)
+
+
+        return digest, total_size
+
+    def get_archive(self, digest):
+        tmp_file = tempfile.TemporaryFile(mode='wb+')
+
+        settings = {'abort_on_prompts': False, 'host_string': self.host,
+                    'abort_exception': RuntimeError, 'remote_interrupt': False,
+                    'always_use_pty': False, 'warn_only': True}
+        if self.user:
+            settings['user'] = self.user
+        if self.identity:
+            settings['key_filename'] = self.identity
+        if self.password:
+            settings['password'] = self.password
+
+        with fabric.api.settings(**settings):
+            fullpath = os.path.join(self.base_dir, digest + '.tar.gz')
+            status = fabric.api.get(local_path = tmp_file,
+                                    remote_path = fullpath)
+        if not status.succeeded:
+            raise RuntimeError("Failed to download archive: '%s'" %
+                               fullpath)
+
+        tmp_file.seek(0)
+        return gzip.GzipFile(fileobj=tmp_file, mode='rb')
+
+    def delete_archive(self, digest):
+        settings = {'abort_on_prompts': False, 'host_string': self.host,
+                    'abort_exception': RuntimeError, 'remote_interrupt': False,
+                    'always_use_pty': False, 'warn_only': True}
+        if self.user:
+            settings['user'] = self.user
+        if self.identity:
+            settings['key_filename'] = self.identity
+        if self.password:
+            settings['password'] = self.password
+
+        with fabric.api.settings(**settings):
+            fullpath = os.path.join(self.base_dir, digest + '.tar.gz')
+            status = fabric.api.run("rm -rf '%s'" % fullpath)
+        if not status.succeeded:
+            raise RuntimeError("Failed to delete archive: '%s'" %
+                               fullpath)
+
+
+def create(storage_type, config):
+    storages = {'filesystem': FilesystemBackupStorage,
+                'ssh': SSHBackupStorage}
+
+    if storage_type not in storages:
+        raise RuntimeError("No such backup storage type: '%s'" % storage_type)
+
+    storage = storages[storage_type](config)
+
+    return storage

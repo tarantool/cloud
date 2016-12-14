@@ -571,7 +571,7 @@ class Tarantool(group.Group):
 
                 if ret['ExitCode'] != 0:
                     raise RuntimeError(
-                        "Failed to restore data of" +
+                        "Failed to restore data of " +
                         instance_id + ": " + out.decode('utf-8'))
 
                 cmd = "sh -c 'mv %s/code/* /opt/deploy'" % \
@@ -583,7 +583,7 @@ class Tarantool(group.Group):
 
                 if ret['ExitCode'] != 0:
                     raise RuntimeError(
-                        "Failed to restore data of" +
+                        "Failed to restore code of " +
                         instance_id + ": " + out.decode('utf-8'))
 
                 _, stat = docker_obj.get_archive(instance_id,
@@ -598,7 +598,7 @@ class Tarantool(group.Group):
 
                 if ret['ExitCode'] != 0:
                     raise RuntimeError(
-                        "Failed to restore current code link of" +
+                        "Failed to restore current code link of " +
                         instance_id + ": " + out.decode('utf-8'))
 
                 cmd = "rm -rf '%s'" % tmp_restore_dir

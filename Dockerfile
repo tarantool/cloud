@@ -19,6 +19,7 @@ RUN set -x \
         flask-restful \
         flask-bootstrap \
         flask-basicauth \
+        fabric3 \
     && : "---------- remove build deps ----------" \
     && apk del .build-deps \
     && mkdir /im \

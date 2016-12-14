@@ -3,7 +3,7 @@
 consul_host = None
 docker_tls_config = None
 consul_acl_token = None
-backup_dir = None
+backup_storage = None
 kv = []
 settings = []
 backups = {}
