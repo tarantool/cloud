@@ -14,7 +14,7 @@ def consul_kv_to_dict(consul_kv_list):
         if item['Value'] == None:
             result[item['Key']] = ""
         else:
-            result[item['Key']] = item['Value'].decode("ascii")
+            result[item['Key']] = item['Value'].decode("utf-8")
     return result
 
 def combine_consul_statuses(statuses):

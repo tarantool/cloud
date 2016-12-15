@@ -211,7 +211,7 @@ class Group(Resource):
 
         parser = reqparse.RequestParser()
         parser = reqparse.RequestParser()
-        parser.add_argument('name')
+        parser.add_argument('name', default='')
         parser.add_argument('memsize', type=float)
         parser.add_argument('async', type=bool, default=False)
         parser.add_argument('heal', type=bool, default=False)
@@ -323,6 +323,8 @@ class GroupList(Resource):
         logging.info("Creating instance")
 
         args = parser.parse_args()
+        args['name'] = args['name'] or ''
+
         group_id = uuid.uuid4().hex
 
         if args['type'] == 'memcached':

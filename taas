@@ -15,10 +15,35 @@ import base64
 import collections
 import tarfile
 import StringIO
+import re
+import copy
 
 GROUP_KEY_ORDER = ["id", "creation_time", "name", "type", "memsize"]
 
 _BOUNDARY_CHARS = string.digits + string.ascii_letters
+
+class termcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+def color_string(string, color):
+    return color + string + termcolors.ENDC
+
+def strip_ansi(string):
+    """Returns string with ansi color codes stripped"""
+    ansi_escape = re.compile(r'\x1b[^m]*m')
+    return ansi_escape.sub('', string)
+
+def visible_len(string):
+    """Returns length of string without ansi escape codes"""
+    ansi_escape = re.compile(r'\x1b[^m]*m')
+    return len(ansi_escape.sub('', string))
 
 def encode_multipart(fields, files, boundary=None):
     r"""Encode dict of form fields and dict of files as multipart/form-data.
@@ -92,14 +117,34 @@ def encode_multipart(fields, files, boundary=None):
 def print_table(header, data):
     lengths = [0] * len(header)
 
+    if not sys.stdout.isatty():
+        data = copy.deepcopy(data)
+        for line in data:
+            for key in line.keys():
+                line[key] = strip_ansi(line[key])
+    else:
+        header = [(h[0], color_string(h[1], termcolors.HEADER)) for h in header]
+
     for idx, field in enumerate(header):
-        maxlen = max([len(d[field[0]])+1 for d in data] + [len(field[1]) + 4])
+        maxlen = max([visible_len(d[field[0]])+1 for d in data] +
+                     [visible_len(field[1]) + 4])
         lengths[idx] = maxlen
 
-    fmt = " ".join('{!s:<%d}'%l for l in lengths)
+    real_lengths = [0] * len(header)
+    for idx, field in enumerate(header):
+        real_lengths[idx] = lengths[idx] + len(field[1]) - \
+                            visible_len(field[1])
+
+    fmt = " ".join('{!s:<%d}'%l for l in real_lengths).decode('utf-8')
 
     print(fmt.format(*[c[1] for c in header]))
     for entry in data:
+        real_lengths = [0] * len(header)
+        for idx, field in enumerate(header):
+            real_lengths[idx] = lengths[idx] + len(entry[field[0]]) - \
+                                visible_len(entry[field[0]])
+
+        fmt = " ".join('{!s:<%d}'%l for l in real_lengths).decode('utf-8')
         print(fmt.format(*[entry[c[0]] for c in header]))
 
 def without_http_prefix(url):
@@ -123,7 +168,7 @@ def http_get(url, args=None, auth=None):
         request.add_header('Authorization', 'Basic %s' % base64string)
 
     response = urllib2.urlopen(request)
-    response_text = response.read()
+    response_text = response.read().decode('utf-8')
 
     return response.getcode(), response_text
 
@@ -145,7 +190,7 @@ def http_post(url, data, auth=None):
     response = urllib2.urlopen(request)
     response_text = response.read()
 
-    return response.getcode(), response_text
+    return response.getcode(), response_text.decode('utf-8')
 
 def http_put(url, data, files=None, auth=None):
     if files:
@@ -171,7 +216,7 @@ def http_put(url, data, files=None, auth=None):
     response = urllib2.urlopen(request)
     response_text = response.read()
 
-    return response.getcode(), response_text
+    return response.getcode(), response_text.decode('utf-8')
 
 def http_delete(url, data, auth=None):
     data_str = json.dumps(data)
@@ -192,7 +237,16 @@ def http_delete(url, data, auth=None):
     response = urllib2.urlopen(request)
     response_text = response.read()
 
-    return response.getcode(), response_text
+    return response.getcode(), response_text.decode('utf-8')
+
+def colorize_state(state_name, state_type):
+    if state_type == 'passing':
+        return color_string(state_name, termcolors.OKGREEN)
+    elif state_type == 'warning':
+        return color_string(state_name, termcolors.WARNING)
+    else:
+        return color_string(state_name, termcolors.FAIL)
+
 
 def ps_command(host, is_quiet, auth):
     url = 'http://%s/api/groups' % without_http_prefix(host)
@@ -213,13 +267,14 @@ def ps_command(host, is_quiet, auth):
         for instance in group['instances']:
 
             result.append({
-                'group_id': group_id,
+                'group_id': color_string(group_id, termcolors.OKBLUE),
                 'instance_num': instance['name'],
                 'name': group['name'],
                 'type': group['type'],
                 'memsize': str(group['memsize']),
                 'mem_used': "{0:.3f}".format(instance['mem_used']),
-                'state': group['state']['name'],
+                'state': colorize_state(instance['state']['name'],
+                                        instance['state']['type']),
                 'addr': instance['addr'],
                 'port': str(instance['port']),
                 'host': instance['host'],
@@ -276,7 +331,7 @@ def inspect_command(host, group_id_list, auth):
 def run_command(host, instance_type,
                 name, memsize, password, auth, verbose):
     args = {'type': instance_type,
-            'name': name,
+            'name': name or '',
             'memsize': memsize,
             'async': True}
 

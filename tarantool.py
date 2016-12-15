@@ -75,7 +75,7 @@ class Tarantool(group.Group):
             creation_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
             kv.put('tarantool/%s/blueprint/type' % group_id, 'tarantool')
-            kv.put('tarantool/%s/blueprint/name' % group_id, name)
+            kv.put('tarantool/%s/blueprint/name' % group_id, name.encode('utf-8'))
             kv.put('tarantool/%s/blueprint/memsize' % group_id, str(memsize))
             kv.put('tarantool/%s/blueprint/check_period' % group_id, str(check_period))
             kv.put('tarantool/%s/blueprint/creation_time' % group_id, creation_time)
