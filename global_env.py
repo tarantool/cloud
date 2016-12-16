@@ -11,6 +11,7 @@ services = {}
 nodes = {}
 containers = {}
 docker_info = {}
+docker_statuses = {}
 default_network_settings = {"network_name": None,
                             "gateway_ip": None,
                             "subnet": None,

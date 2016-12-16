@@ -170,7 +170,7 @@ class Group(Resource):
     def delete(self, group_id):
         abort_if_group_doesnt_exist(group_id)
 
-        parser = reqparse.RequestParser()
+        parser = reqparse.RequestParser(bundle_errors=True)
         parser.add_argument('async', type=bool, default=False)
         args = parser.parse_args()
 
@@ -209,8 +209,7 @@ class Group(Resource):
     def put(self, group_id):
         abort_if_group_doesnt_exist(group_id)
 
-        parser = reqparse.RequestParser()
-        parser = reqparse.RequestParser()
+        parser = reqparse.RequestParser(bundle_errors=True)
         parser.add_argument('name', default='')
         parser.add_argument('memsize', type=float)
         parser.add_argument('async', type=bool, default=False)
@@ -313,7 +312,7 @@ class GroupList(Resource):
         return result
 
     def post(self):
-        parser = reqparse.RequestParser()
+        parser = reqparse.RequestParser(bundle_errors=True)
         parser.add_argument('type', required=True)
         parser.add_argument('name', required=True)
         parser.add_argument('memsize', type=float, default=0.5)
@@ -371,7 +370,7 @@ class GroupList(Resource):
 
 class Task(Resource):
     def get(self, task_id):
-        parser = reqparse.RequestParser()
+        parser = reqparse.RequestParser(bundle_errors=True)
         parser.add_argument('index', type=int)
 
         args = parser.parse_args()
@@ -404,7 +403,7 @@ class Backup(Resource):
         return result
 
     def delete(self, backup_id):
-        parser = reqparse.RequestParser()
+        parser = reqparse.RequestParser(bundle_errors=True)
         parser.add_argument('async', type=bool, default=False)
         args = parser.parse_args()
 
@@ -451,7 +450,7 @@ class InstanceBackupList(Resource):
     def post(self, group_id):
         abort_if_group_doesnt_exist(group_id)
 
-        parser = reqparse.RequestParser()
+        parser = reqparse.RequestParser(bundle_errors=True)
         parser.add_argument('async', type=bool, default=False)
 
         args = parser.parse_args()

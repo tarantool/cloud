@@ -8,6 +8,10 @@ import time
 import dateutil.parser
 import collections
 import logging
+import gevent
+import requests
+
+DOCKER_API_TIMEOUT = 10 # seconds
 
 def consul_kv_to_dict(consul_kv_list):
     result = {}
@@ -49,16 +53,20 @@ class Sense(object):
         docker_info = {}
 
         for entry in services.get('docker', []):
-            statuses = [check['Status'] for check in entry['Checks']]
+            addr = entry['Service']['Address'] or entry['Node']['Address']
+            port = entry['Service']['Port']
+            if port:
+                addr = addr + ':' + str(port)
 
-            if all([s == 'passing' for s in statuses]):
-                addr = entry['Service']['Address'] or entry['Node']['Address']
-                port = entry['Service']['Port']
-                if port:
-                    addr = addr + ':' + str(port)
+            statuses = [check['Status'] for check in entry['Checks']]
+            docker_host_status = global_env.docker_statuses.get(addr, None)
+
+            if all([s == 'passing' for s in statuses]) and \
+               docker_host_status == 'passing':
 
                 docker_obj = docker.Client(base_url=addr,
-                                           tls=global_env.docker_tls_config)
+                                           tls=global_env.docker_tls_config,
+                                           timeout=DOCKER_API_TIMEOUT)
                 containers[entry['Node']['Address']] = \
                     docker_obj.containers(all=True)
 
@@ -312,6 +320,12 @@ class Sense(object):
             addr = service_addr
             if port:
                 addr += ':' + str(port)
+
+            docker_host_status = global_env.docker_statuses.get(addr, None)
+
+            if docker_host_status != 'passing':
+                status = docker_host_status
+
             result.append({'addr': addr,
                            'tags': tags,
                            'consul_host': consul_host,
@@ -389,14 +403,77 @@ class Sense(object):
             except Exception:
                 time.sleep(10)
 
+    @classmethod
+    def docker_status_update(cls):
+        while True:
+            try:
+                try:
+                    consul_obj = consul.Consul(host=global_env.consul_host,
+                                           token=global_env.consul_acl_token)
 
+                    docker_status = {}
+                    services = consul_obj.health.service('docker')[1] or []
+                except consul.base.ConsulException as ex:
+                    if "No cluster leader" in str(ex):
+                        logging.warn(
+                            "Won't update docker status: no consul leader")
+                        continue
+
+                for entry in services:
+                    statuses = [check['Status'] for check in entry['Checks']]
+                    addr = entry['Service']['Address'] or entry['Node']['Address']
+                    port = entry['Service']['Port']
+                    if port:
+                        addr = addr + ':' + str(port)
+
+                    docker_status[addr] = 'passing'
+
+                    if all([s == 'passing' for s in statuses]):
+
+                        docker_obj = docker.Client(
+                            base_url=addr,
+                            tls=global_env.docker_tls_config,
+                            timeout=DOCKER_API_TIMEOUT)
+                        try:
+                            docker_obj.info()
+                            docker_status[addr] = 'passing'
+                        except requests.exceptions.ReadTimeout as ex:
+                            logging.error("Timed out accessing docker node: %s",
+                                          addr)
+                            docker_status[addr] = 'critical'
+                        except requests.exceptions.ConnectionError as ex:
+                            logging.error("Can't connect to docker node: %s",
+                                          addr)
+                            docker_status[addr] = 'critical'
+                        except Exception as ex:
+                            logging.exception(
+                                "Failed to get data from docker: %s", addr)
+                            docker_status[addr] = 'critical'
+                    else:
+                        docker_status[addr] = 'critical'
+
+                global_env.docker_statuses = docker_status
+                time.sleep(10)
+            except Exception as ex:
+                logging.exception("Failed to update data from docker")
+                time.sleep(1)
 
     @classmethod
     def timer_update(cls):
+        gevent.spawn(cls.docker_status_update)
+
         while True:
             try:
                 cls.update()
                 time.sleep(10)
+            except consul.base.ConsulException as ex:
+                if "No cluster leader" in str(ex):
+                    logging.warn(
+                        "Won't update consul status: no consul leader")
+                    continue
+                else:
+                    logging.exception("Failed to update data from consul")
+                    time.sleep(10)
             except Exception as ex:
                 logging.exception("Failed to update data from consul")
-                time.sleep(1)
+                time.sleep(10)
