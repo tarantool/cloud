@@ -278,7 +278,10 @@ def ps_command(host, is_quiet, auth):
                 'addr': instance['addr'],
                 'port': str(instance['port']),
                 'host': instance['host'],
+                'date': group['creation_time'].split('T')[0],
+                'time': group['creation_time'].split('.')[0]
             })
+    result = sorted(result, key=lambda x: x['time'], reverse=True)
 
     header = [
         ('group_id', 'GROUP'),
@@ -290,7 +293,8 @@ def ps_command(host, is_quiet, auth):
         ('state', 'STATE'),
         ('addr', 'ADDRESS'),
         ('port', 'PORT'),
-        ('host', 'NODE')
+        ('host', 'NODE'),
+        ('date', 'DATE')
     ]
 
     if not is_quiet:
