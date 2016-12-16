@@ -7,6 +7,7 @@ import re
 import time
 import dateutil.parser
 import collections
+import logging
 
 def consul_kv_to_dict(consul_kv_list):
     result = {}
@@ -396,5 +397,6 @@ class Sense(object):
             try:
                 cls.update()
                 time.sleep(10)
-            except Exception:
+            except Exception as ex:
+                logging.exception("Failed to update data from consul")
                 time.sleep(1)
