@@ -782,6 +782,48 @@ def backups_rm_command(host, backup_id_list, auth, verbose):
         print('')
 
 
+def servers_ls_command(host, is_quiet, auth):
+    url = 'http://%s/api/servers' % without_http_prefix(host)
+
+    try:
+        _, data_str = http_get(url, None, auth)
+    except urllib2.HTTPError, err:
+        if err.code == 401:
+            print("Authorization required")
+            sys.exit(1)
+        else:
+            raise
+
+    data = json.loads(data_str)
+
+    result = []
+    for addr, server in data.items():
+        result.append({
+            'addr': addr,
+            'tags': ','.join(server['tags']),
+            'status': colorize_state(server['state']['name'],
+                                     server['state']['type']),
+            'cpus': '%d' % server['cpus'],
+            'memory': "{0:.3f}".format(server['memory'])
+        })
+
+    result = sorted(result, key=lambda x: x['addr'])
+
+    header = [
+        ('addr', 'ADDR'),
+        ('tags', 'TAGS'),
+        ('status', 'STATE'),
+        ('cpus', 'CPUS'),
+        ('memory', 'MEMORY')
+    ]
+
+    if not is_quiet:
+        print_table(header, result)
+    else:
+        groups = set([i['backup_id'] for i in result])
+        print('\n'.join(groups))
+
+
 def main():
     # Don't spam with HTTP connection logs from 'requests' module
     logging.getLogger("requests").setLevel(logging.WARNING)
@@ -914,6 +956,20 @@ def main():
         nargs='+',
         help='backup to remove')
 
+    servers_parser = subparsers.add_parser(
+        'servers', help='manage servers')
+
+    servers_subparsers = servers_parser.add_subparsers(
+        title="commands",
+        dest="servers_subparser_name")
+
+    servers_ls_parser = servers_subparsers.add_parser('ls')
+    servers_ls_parser.add_argument(
+        '-q', '--quiet',
+        action='store_true',
+        help='only show server addresses')
+
+
     args = parser.parse_args()
 
     auth = None
@@ -961,6 +1017,8 @@ def main():
         backups_ls_command(host, args.quiet, auth)
     elif args.subparser_name == 'backups' and args.backup_subparser_name == 'rm':
         backups_rm_command(host, args.backup_id, auth, args.verbose)
+    elif args.subparser_name == 'servers' and args.servers_subparser_name == 'ls':
+        servers_ls_command(host, args.quiet, auth)
 
 if __name__ == '__main__':
     main()

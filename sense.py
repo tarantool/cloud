@@ -309,12 +309,12 @@ class Sense(object):
             tags = entry['Service']['Tags'] or []
             port = entry['Service']['Port']
             consul_host = entry['Node']['Address']
-            cpus = None
-            memory = None
+            cpus = 0
+            memory = 0
             if consul_host in global_env.docker_info:
                 info = global_env.docker_info[consul_host]
 
-                cpus = info['NCPU']
+                cpus = float(info['NCPU'])
                 memory = float(info['MemTotal']) / (1024**3)
 
             addr = service_addr

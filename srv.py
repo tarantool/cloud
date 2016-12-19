@@ -395,6 +395,22 @@ class TaskList(Resource):
         return result
 
 
+class ServerList(Resource):
+    def get(self):
+        result = {}
+
+        for entry in sense.Sense.docker_hosts():
+            result[entry['addr']] = {
+                'addr': entry['addr'],
+                'state': state_to_dict(entry['status']),
+                'tags': entry['tags'],
+                'cpus': entry['cpus'],
+                'memory': entry['memory']
+            }
+
+        return result
+
+
 class Backup(Resource):
     def get(self, backup_id):
         abort_if_backup_doesnt_exist(backup_id)
@@ -541,6 +557,9 @@ def setup_routes():
 
     api.add_resource(BackupList, '/api/backups')
     api.add_resource(Backup, '/api/backups/<backup_id>')
+
+    api.add_resource(ServerList, '/api/servers')
+
 
 @app.route('/servers')
 def list_servers():
