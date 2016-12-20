@@ -5,10 +5,14 @@ ENV PYTHONUNBUFFERED=1
 RUN set -x \
     && apk add --no-cache --virtual .run-deps \
         python3 \
+        libffi \
+        openssl \
     && apk add --no-cache --virtual .build-deps \
         python3-dev \
         musl-dev \
         gcc \
+        libffi-dev \
+        openssl-dev \
     && pip3 install \
         tarantool \
         ipaddress \
