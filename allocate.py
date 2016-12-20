@@ -24,7 +24,7 @@ def allocate(memory, anti_affinity = []):
 
         for instance in allocations[group_id]['instances'].values():
             host = instance['host'].split(':')[0]
-            memory_used[host] += memsize
+            memory_used[host] = memory_used.get(host, 0) + memsize
 
     scores = []
 
