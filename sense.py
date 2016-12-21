@@ -436,6 +436,7 @@ class Sense(object):
                             timeout=DOCKER_API_TIMEOUT)
                         try:
                             docker_obj.info()
+                            docker_obj.containers()
                             docker_status[addr] = 'passing'
                         except requests.exceptions.ReadTimeout as ex:
                             logging.error("Timed out accessing docker node: %s",
