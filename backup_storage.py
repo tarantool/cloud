@@ -59,7 +59,7 @@ class BackupStorage(object):
     def delete_archive(self, digest):
         raise NotImplementedError()
 
-    def register_backup(self, backup_id, archive_id, instance_type,
+    def register_backup(self, backup_id, archive_id, group_id, instance_type,
                         size, mem_used):
         consul_obj = consul.Consul(host=global_env.consul_host,
                                    token=global_env.consul_acl_token)
@@ -68,6 +68,7 @@ class BackupStorage(object):
         creation_time = datetime.datetime.now(
             datetime.timezone.utc).isoformat()
 
+        kv.put('tarantool_backups/%s/group_id' % backup_id, group_id)
         kv.put('tarantool_backups/%s/type' % backup_id, instance_type)
         kv.put('tarantool_backups/%s/archive_id' % backup_id, archive_id)
         kv.put('tarantool_backups/%s/creation_time' % backup_id, creation_time)

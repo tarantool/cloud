@@ -265,14 +265,17 @@ def ps_command(host, is_quiet, auth):
     result = []
     for group_id, group in data.items():
         for instance in group['instances']:
-
+            if instance['mem_used'] is not None:
+                mem_used = "{0:.3f}".format(instance['mem_used'])
+            else:
+                mem_used = 'N/A'
             result.append({
                 'group_id': color_string(group_id, termcolors.OKBLUE),
                 'instance_num': instance['name'],
                 'name': group['name'],
                 'type': group['type'],
                 'memsize': str(group['memsize']),
-                'mem_used': "{0:.3f}".format(instance['mem_used']),
+                'mem_used': mem_used,
                 'state': colorize_state(instance['state']['name'],
                                         instance['state']['type']),
                 'addr': instance['addr'],
@@ -281,6 +284,7 @@ def ps_command(host, is_quiet, auth):
                 'date': group['creation_time'].split('T')[0],
                 'time': group['creation_time'].split('.')[0]
             })
+
     result = sorted(result, key=lambda x: x['time'], reverse=True)
 
     header = [
@@ -593,7 +597,7 @@ def backup_command(host, group_id, auth, verbose):
     data = json.loads(data_str)
 
     task_id = data['task_id']
-    group_id = data['id']
+    backup_id = data.get('id', None)
 
     status = "running"
     index = 0
@@ -629,7 +633,8 @@ def backup_command(host, group_id, auth, verbose):
     if not verbose:
         print('')
 
-    print(group_id)
+    if backup_id:
+        print(backup_id)
 
 
 def restore_command(host, group_id, backup_id, auth, verbose):
@@ -707,6 +712,7 @@ def backups_ls_command(host, is_quiet, auth):
     for backup_id, backup in data.items():
         result.append({
             'backup_id': backup_id,
+            'group_id': str(backup['group_id']),
             'type': backup['type'],
             'size': "{0:.3f}".format(backup['size'] / 1024 ** 3),
             'mem_used': "{0:.3f}".format(backup['mem_used']),
@@ -717,6 +723,7 @@ def backups_ls_command(host, is_quiet, auth):
 
     header = [
         ('backup_id', 'BACKUP'),
+        ('group_id', 'GROUP'),
         ('type', 'TYPE'),
         ('size', 'SIZE'),
         ('mem_used', 'MEM USED'),

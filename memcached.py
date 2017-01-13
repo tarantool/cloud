@@ -403,8 +403,8 @@ class Memcached(group.Group):
                 instance_id)
 
         mem_used = services['instances'][instance_num]['mem_used']
-        storage.register_backup(backup_id, archive_id, 'memcached',
-                                size, mem_used)
+        storage.register_backup(backup_id, archive_id, group_id,
+                                'memcached', size, mem_used)
 
         Sense.update()
 

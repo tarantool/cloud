@@ -102,6 +102,7 @@ def backup_to_dict(backup_id):
 
     return {'id': backup_id,
             'archive_id': backup['archive_id'],
+            'group_id': backup['group_id'],
             'type': backup['type'],
             'creation_time': backup['creation_time'].isoformat(),
             'size': backup['size'],
@@ -124,15 +125,26 @@ def group_to_dict(group_id):
 
     instances = []
 
-    for instance_num in services['instances']:
+    for instance_num in blueprint['instances']:
         addr = blueprint['instances'][instance_num]['addr']
-        host = allocation['instances'][instance_num]['host']
+
         type_str = blueprint['type']
         name = instance_num
         instance_id = group_id + '_' + instance_num
-        instance_state = services['instances'][instance_num]['status']
-        port = services['instances'][instance_num]['port']
-        mem_used = services['instances'][instance_num]['mem_used']
+
+        if instance_num in allocation['instances']:
+            host = allocation['instances'][instance_num]['host']
+        else:
+            host = "N/A"
+
+        if instance_num in services['instances']:
+            instance_state = services['instances'][instance_num]['status']
+            port = services['instances'][instance_num]['port']
+            mem_used = services['instances'][instance_num]['mem_used']
+        else:
+            instance_state = 'critical'
+            port = None
+            mem_used = None
 
         image_name = None
         image_id = None
@@ -717,7 +729,7 @@ def get_config(config_file):
     opts = ['CONSUL_HOST', 'DOCKER_CLIENT_CERT',
             'DOCKER_SERVER_CERT', 'DOCKER_CLIENT_KEY',
             'CONSUL_ACL_TOKEN', 'HTTP_BASIC_USERNAME',
-            'HTTP_BASIC_PASSWORD', 'LISTEN_PORT',
+            'HTTP_BASIC_PASSWORD', 'LISTEN_ADDR', 'LISTEN_PORT',
             'IPALLOC_RANGE', 'DOCKER_NETWORK',
             'CREATE_NETWORK_AUTOMATICALLY', 'GATEWAY_IP',
             'BACKUP_STORAGE_TYPE', 'BACKUP_BASE_DIR',
@@ -744,7 +756,17 @@ def main():
 
     cfg = get_config(args.config)
 
-    listen_port = int(cfg.get('LISTEN_PORT', '5000'))
+    listen_addr = cfg.get('LISTEN_ADDR', None)
+    listen_port = cfg.get('LISTEN_PORT', None)
+
+    if not listen_addr and not listen_port:
+        listen_addr = 'unix://' + os.path.expanduser("~/.taas.sock")
+        listen_port = None
+    elif listen_port:
+        listen_addr = ''
+    else:
+        listen_port = '5000'
+
     global_env.consul_host = cfg.get('CONSUL_HOST', None)
     global_env.consul_acl_token = cfg.get('CONSUL_ACL_TOKEN', None)
 
@@ -798,8 +820,15 @@ def main():
     gevent.spawn(sense.Sense.timer_update)
     gevent.spawn(ip_pool.ip_cache_invalidation_loop)
 
-    http_server = WSGIServer(('', listen_port), app)
-    logging.info("Listening on port %d", listen_port)
+    if listen_addr.startswith('unix:/'):
+        listen_on = (listen_addr,)
+    else:
+        listen_on = (listen_addr, int(listen_port))
+
+    http_server = WSGIServer(listen_on, app)
+
+    logging.info("Listening on: %s", listen_on)
+
     http_server.serve_forever()
 
 

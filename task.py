@@ -5,10 +5,11 @@ import datetime
 import gevent
 import logging
 
+STATUS_RUNNING = "running"
 STATUS_SUCCESS = "success"
 STATUS_WARNING = "warning"
 STATUS_CRITICAL = "error"
-STATUS_RUNNING = "running"
+
 
 STATUSES = [STATUS_SUCCESS, STATUS_WARNING, STATUS_CRITICAL, STATUS_RUNNING]
 

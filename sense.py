@@ -174,6 +174,12 @@ class Sense(object):
                 backup_id = match.group(1)
                 backups[backup_id]['type'] = value
 
+            match = re.match('tarantool_backups/(.*)/group_id',
+                             key)
+            if match:
+                backup_id = match.group(1)
+                backups[backup_id]['group_id'] = value
+
             match = re.match('tarantool_backups/(.*)/archive_id',
                              key)
             if match:
