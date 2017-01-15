@@ -848,9 +848,11 @@ def main():
                         help='enable verbose output')
 
     parser.add_argument('-u', '--username',
+                        dest='http_username',
                         help='User name for HTTP Basic Auth')
 
     parser.add_argument('-p', '--password',
+                        dest='http_password',
                         help='Password for HTTP Basic Auth')
 
     parser.add_argument('-c', '--cafile',
@@ -984,8 +986,8 @@ def main():
     args = parser.parse_args()
 
     auth = None
-    if args.username and args.password:
-        auth = (args.username, args.password)
+    if args.http_username and args.http_password:
+        auth = (args.http_username, args.http_password)
 
     cafile = None
     if args.cafile:
