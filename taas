@@ -147,17 +147,18 @@ def print_table(header, data):
         fmt = " ".join('{!s:<%d}'%l for l in real_lengths).decode('utf-8')
         print(fmt.format(*[entry[c[0]] for c in header]))
 
-def without_http_prefix(url):
-    """
-    Returns a URL without the http:// or https:// prefixes
-    """
-    if url.startswith('http://'):
-        return url[7:]
-    elif url.startswith('https://'):
-        return url[8:]
-    return url
 
-def http_get(url, args=None, auth=None):
+def add_http_prefix(url):
+    """
+    Add a http:// prefix to url if it doesn't start with http*://
+    """
+    if url.startswith('http://') or url.startswith('https://'):
+        return url
+
+    return 'http://' + url
+
+
+def http_get(url, args=None, auth=None, cafile=None):
     if args:
         url = url + '?' + urllib.urlencode(args, True)
 
@@ -167,12 +168,12 @@ def http_get(url, args=None, auth=None):
             '%s:%s' % (auth[0], auth[1])).replace('\n', '')
         request.add_header('Authorization', 'Basic %s' % base64string)
 
-    response = urllib2.urlopen(request)
+    response = urllib2.urlopen(request, cafile=cafile)
     response_text = response.read().decode('utf-8')
 
     return response.getcode(), response_text
 
-def http_post(url, data, auth=None):
+def http_post(url, data, auth=None, cafile=None):
     data_str = json.dumps(data)
     data_len = len(data_str)
 
@@ -187,12 +188,12 @@ def http_post(url, data, auth=None):
             '%s:%s' % (auth[0], auth[1])).replace('\n', '')
         request.add_header('Authorization', 'Basic %s' % base64string)
 
-    response = urllib2.urlopen(request)
+    response = urllib2.urlopen(request, cafile=cafile)
     response_text = response.read()
 
     return response.getcode(), response_text.decode('utf-8')
 
-def http_put(url, data, files=None, auth=None):
+def http_put(url, data, files=None, auth=None, cafile=None):
     if files:
         data, headers = encode_multipart(data, files)
     else:
@@ -213,12 +214,12 @@ def http_put(url, data, files=None, auth=None):
             '%s:%s' % (auth[0], auth[1])).replace('\n', '')
         request.add_header('Authorization', 'Basic %s' % base64string)
 
-    response = urllib2.urlopen(request)
+    response = urllib2.urlopen(request, cafile=cafile)
     response_text = response.read()
 
     return response.getcode(), response_text.decode('utf-8')
 
-def http_delete(url, data, auth=None):
+def http_delete(url, data, auth=None, cafile=None):
     data_str = json.dumps(data)
     data_len = len(data_str)
 
@@ -234,7 +235,7 @@ def http_delete(url, data, auth=None):
             '%s:%s' % (auth[0], auth[1])).replace('\n', '')
         request.add_header('Authorization', 'Basic %s' % base64string)
 
-    response = urllib2.urlopen(request)
+    response = urllib2.urlopen(request, cafile=cafile)
     response_text = response.read()
 
     return response.getcode(), response_text.decode('utf-8')
@@ -248,11 +249,11 @@ def colorize_state(state_name, state_type):
         return color_string(state_name, termcolors.FAIL)
 
 
-def ps_command(host, is_quiet, auth):
-    url = 'http://%s/api/groups' % without_http_prefix(host)
+def ps_command(host, is_quiet, auth, cafile):
+    url = '%s/api/groups' % add_http_prefix(host)
 
     try:
-        _, data_str = http_get(url, None, auth)
+        _, data_str = http_get(url, None, auth, cafile)
     except urllib2.HTTPError, err:
         if err.code == 401:
             print("Authorization required")
@@ -308,13 +309,13 @@ def ps_command(host, is_quiet, auth):
         print('\n'.join(groups))
 
 
-def inspect_command(host, group_id_list, auth):
+def inspect_command(host, group_id_list, auth, cafile):
     result = []
     for group_id in group_id_list:
-        url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
+        url = '%s/api/groups/%s' % (add_http_prefix(host), group_id)
         data_str = None
         try:
-            _, data_str = http_get(url, None, auth)
+            _, data_str = http_get(url, None, auth, cafile)
         except urllib2.HTTPError, err:
             if err.code == 404:
                 print("No such group: '%s'" % group_id)
@@ -337,7 +338,7 @@ def inspect_command(host, group_id_list, auth):
 
 
 def run_command(host, instance_type,
-                name, memsize, password, auth, verbose):
+                name, memsize, password, auth, cafile, verbose):
     args = {'type': instance_type,
             'name': name or '',
             'memsize': memsize,
@@ -346,10 +347,10 @@ def run_command(host, instance_type,
     if password:
         args['password'] = password
 
-    url = 'http://%s/api/groups' % without_http_prefix(host)
+    url = '%s/api/groups' % add_http_prefix(host)
 
     try:
-        _, data_str = http_post(url, args, auth)
+        _, data_str = http_post(url, args, auth, cafile)
     except urllib2.HTTPError, err:
         if err.code == 401:
             print("Authorization required")
@@ -365,10 +366,10 @@ def run_command(host, instance_type,
     status = "running"
     index = 0
     while status == "running":
-        url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+        url = '%s/api/tasks/%s' % (add_http_prefix(host), task_id)
         args = {"index": index}
         try:
-            _, data_str = http_get(url, args, auth)
+            _, data_str = http_get(url, args, auth, cafile)
         except urllib2.HTTPError, err:
             if err.code == 401:
                 print("Authorization required")
@@ -394,11 +395,11 @@ def run_command(host, instance_type,
 
     print(group_id)
 
-def rm_command(host, group_id_list, auth, verbose):
+def rm_command(host, group_id_list, auth, cafile, verbose):
     for group_id in group_id_list:
-        url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
+        url = '%s/api/groups/%s' % (add_http_prefix(host), group_id)
         try:
-            _, data_str = http_delete(url, {'async': True}, auth)
+            _, data_str = http_delete(url, {'async': True}, auth, cafile)
         except urllib2.HTTPError, err:
             if err.code == 404:
                 print("No such group: '%s'" % group_id)
@@ -415,10 +416,10 @@ def rm_command(host, group_id_list, auth, verbose):
         status = "running"
         index = 0
         while status == "running":
-            url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+            url = '%s/api/tasks/%s' % (add_http_prefix(host), task_id)
             args = {"index": index}
             try:
-                _, data_str = http_get(url, args, auth)
+                _, data_str = http_get(url, args, auth, cafile)
             except urllib2.HTTPError, err:
                 if err.code == 401:
                     print("Authorization required")
@@ -444,7 +445,7 @@ def rm_command(host, group_id_list, auth, verbose):
 
 
 def update_command(host, group_id, name, memsize, password, config, heal,
-                   auth, verbose):
+                   auth, cafile, verbose):
     data = {'async': True}
     files = None
     if heal:
@@ -476,7 +477,7 @@ def update_command(host, group_id, name, memsize, password, config, heal,
                             'content': filedata}}
         data['config_is_dir'] = is_dir
 
-    url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
+    url = '%s/api/groups/%s' % (add_http_prefix(host), group_id)
 
     try:
         _, data_str = http_put(url, data, files=files, auth=auth)
@@ -496,10 +497,10 @@ def update_command(host, group_id, name, memsize, password, config, heal,
     status = "running"
     index = 0
     while status == "running":
-        url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+        url = '%s/api/tasks/%s' % (add_http_prefix(host), task_id)
         args = {"index": index}
         try:
-            _, data_str = http_get(url, args, auth)
+            _, data_str = http_get(url, args, auth, cafile)
         except urllib2.HTTPError, err:
             if err.code == 401:
                 print("Authorization required")
@@ -524,14 +525,14 @@ def update_command(host, group_id, name, memsize, password, config, heal,
     if not verbose:
         print('')
 
-def upgrade_command(host, group_id, auth, verbose):
+def upgrade_command(host, group_id, auth, cafile, verbose):
     data = {'async': True,
             'docker_image_name': 'tarantool-cloud-memcached'}
 
-    url = 'http://%s/api/groups/%s' % (without_http_prefix(host), group_id)
+    url = '%s/api/groups/%s' % (add_http_prefix(host), group_id)
 
     try:
-        _, data_str = http_put(url, data, auth=auth)
+        _, data_str = http_put(url, data, auth=auth, cafile=cafile)
     except urllib2.HTTPError, err:
         if err.code == 404:
             print("No such group: '%s'" % group_id)
@@ -548,10 +549,10 @@ def upgrade_command(host, group_id, auth, verbose):
     status = "running"
     index = 0
     while status == "running":
-        url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+        url = '%s/api/tasks/%s' % (add_http_prefix(host), task_id)
         args = {"index": index}
         try:
-            _, data_str = http_get(url, args, auth)
+            _, data_str = http_get(url, args, auth, cafile)
         except urllib2.HTTPError, err:
             if err.code == 401:
                 print("Authorization required")
@@ -575,14 +576,14 @@ def upgrade_command(host, group_id, auth, verbose):
     if not verbose:
         print('')
 
-def backup_command(host, group_id, auth, verbose):
+def backup_command(host, group_id, auth, cafile, verbose):
     args = {'async': True}
 
-    url = 'http://%s/api/groups/%s/backups' % (without_http_prefix(host),
+    url = '%s/api/groups/%s/backups' % (add_http_prefix(host),
                                                group_id)
 
     try:
-        _, data_str = http_post(url, args, auth)
+        _, data_str = http_post(url, args, auth, cafile)
     except urllib2.HTTPError, err:
         if err.code == 500:
             data = json.loads(err.read())
@@ -602,10 +603,10 @@ def backup_command(host, group_id, auth, verbose):
     status = "running"
     index = 0
     while status == "running":
-        url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+        url = '%s/api/tasks/%s' % (add_http_prefix(host), task_id)
         args = {"index": index}
         try:
-            _, data_str = http_get(url, args, auth)
+            _, data_str = http_get(url, args, auth, cafile)
         except urllib2.HTTPError, err:
             if err.code == 500:
                 data = json.loads(err.read())
@@ -637,15 +638,15 @@ def backup_command(host, group_id, auth, verbose):
         print(backup_id)
 
 
-def restore_command(host, group_id, backup_id, auth, verbose):
+def restore_command(host, group_id, backup_id, auth, cafile, verbose):
     args = {'async': True,
             'backup_id': backup_id}
 
-    url = 'http://%s/api/groups/%s' % (without_http_prefix(host),
+    url = '%s/api/groups/%s' % (add_http_prefix(host),
                                        group_id)
 
     try:
-        _, data_str = http_put(url, args, auth)
+        _, data_str = http_put(url, args, auth, cafile)
     except urllib2.HTTPError, err:
         if err.code == 500:
             data = json.loads(err.read())
@@ -666,10 +667,10 @@ def restore_command(host, group_id, backup_id, auth, verbose):
     status = "running"
     index = 0
     while status == "running":
-        url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+        url = '%s/api/tasks/%s' % (add_http_prefix(host), task_id)
         args = {"index": index}
         try:
-            _, data_str = http_get(url, args, auth)
+            _, data_str = http_get(url, args, auth, cafile)
         except urllib2.HTTPError, err:
             if err.code == 401:
                 print("Authorization required")
@@ -694,11 +695,11 @@ def restore_command(host, group_id, backup_id, auth, verbose):
     if not verbose:
         print('')
 
-def backups_ls_command(host, is_quiet, auth):
-    url = 'http://%s/api/backups' % without_http_prefix(host)
+def backups_ls_command(host, is_quiet, auth, cafile):
+    url = '%s/api/backups' % add_http_prefix(host)
 
     try:
-        _, data_str = http_get(url, None, auth)
+        _, data_str = http_get(url, None, auth, cafile)
     except urllib2.HTTPError, err:
         if err.code == 401:
             print("Authorization required")
@@ -736,11 +737,11 @@ def backups_ls_command(host, is_quiet, auth):
         groups = set([i['backup_id'] for i in result])
         print('\n'.join(groups))
 
-def backups_rm_command(host, backup_id_list, auth, verbose):
+def backups_rm_command(host, backup_id_list, auth, cafile, verbose):
     for backup_id in backup_id_list:
-        url = 'http://%s/api/backups/%s' % (without_http_prefix(host), backup_id)
+        url = '%s/api/backups/%s' % (add_http_prefix(host), backup_id)
         try:
-            _, data_str = http_delete(url, {'async': True}, auth)
+            _, data_str = http_delete(url, {'async': True}, auth, cafile)
         except urllib2.HTTPError, err:
             if err.code == 500:
                 data = json.loads(err.read())
@@ -761,10 +762,10 @@ def backups_rm_command(host, backup_id_list, auth, verbose):
         status = "running"
         index = 0
         while status == "running":
-            url = 'http://%s/api/tasks/%s' % (without_http_prefix(host), task_id)
+            url = '%s/api/tasks/%s' % (add_http_prefix(host), task_id)
             args = {"index": index}
             try:
-                _, data_str = http_get(url, args, auth)
+                _, data_str = http_get(url, args, auth, cafile)
             except urllib2.HTTPError, err:
                 if err.code == 401:
                     print("Authorization required")
@@ -789,11 +790,11 @@ def backups_rm_command(host, backup_id_list, auth, verbose):
         print('')
 
 
-def servers_ls_command(host, is_quiet, auth):
-    url = 'http://%s/api/servers' % without_http_prefix(host)
+def servers_ls_command(host, is_quiet, auth, cafile):
+    url = '%s/api/servers' % add_http_prefix(host)
 
     try:
-        _, data_str = http_get(url, None, auth)
+        _, data_str = http_get(url, None, auth, cafile)
     except urllib2.HTTPError, err:
         if err.code == 401:
             print("Authorization required")
@@ -851,6 +852,9 @@ def main():
 
     parser.add_argument('-p', '--password',
                         help='Password for HTTP Basic Auth')
+
+    parser.add_argument('-c', '--cafile',
+                        help='CA file')
 
     subparsers = parser.add_subparsers(title="commands", dest="subparser_name")
 
@@ -983,6 +987,10 @@ def main():
     if args.username and args.password:
         auth = (args.username, args.password)
 
+    cafile = None
+    if args.cafile:
+        cafile = args.cafile
+
     host = None
     if args.host is None:
         if 'TARANTOOL_CLOUD_HOST' in os.environ:
@@ -993,39 +1001,40 @@ def main():
         host = args.host
 
     if args.subparser_name == 'ps':
-        ps_command(host, args.quiet, auth)
+        ps_command(host, args.quiet, auth, cafile)
     if args.subparser_name == 'inspect':
-        inspect_command(host, args.group_id, auth)
+        inspect_command(host, args.group_id, auth, cafile)
     elif args.subparser_name == 'run':
         run_command(host, args.type,
                     args.name, args.memsize, args.password,
-                    auth, args.verbose)
+                    auth, cafile, args.verbose)
     elif args.subparser_name == 'rm':
-        rm_command(host, args.group_id, auth, args.verbose)
+        rm_command(host, args.group_id, auth, cafile, args.verbose)
     elif args.subparser_name == 'update':
         update_command(host, args.group_id, args.name,
                        args.memsize, args.password, args.config, False,
-                       auth, args.verbose)
+                       auth, cafile, args.verbose)
     elif args.subparser_name == 'upgrade':
-        upgrade_command(host, args.group_id, auth, args.verbose)
+        upgrade_command(host, args.group_id, auth, cafile, args.verbose)
     elif args.subparser_name == 'heal':
         update_command(host, args.group_id, None,
                        None, None, None, True,
-                       auth, args.verbose)
+                       auth, cafile, args.verbose)
     elif args.subparser_name == 'deploy':
         update_command(host, args.group_id, None,
                        None, None, args.path, False,
-                       auth, args.verbose)
+                       auth, cafile, args.verbose)
     elif args.subparser_name == 'backup':
-        backup_command(host, args.group_id, auth, args.verbose)
+        backup_command(host, args.group_id, auth, cafile, args.verbose)
     elif args.subparser_name == 'restore':
-        restore_command(host, args.group_id, args.backup_id, auth, args.verbose)
+        restore_command(host, args.group_id, args.backup_id, auth, cafile,
+                        args.verbose)
     elif args.subparser_name == 'backups' and args.backup_subparser_name == 'ls':
-        backups_ls_command(host, args.quiet, auth)
+        backups_ls_command(host, args.quiet, cafile, auth)
     elif args.subparser_name == 'backups' and args.backup_subparser_name == 'rm':
-        backups_rm_command(host, args.backup_id, auth, args.verbose)
+        backups_rm_command(host, args.backup_id, auth, cafile, args.verbose)
     elif args.subparser_name == 'servers' and args.servers_subparser_name == 'ls':
-        servers_ls_command(host, args.quiet, auth)
+        servers_ls_command(host, args.quiet, auth, cafile)
 
 if __name__ == '__main__':
     main()
