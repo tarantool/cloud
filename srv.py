@@ -733,7 +733,8 @@ def get_config(config_file):
             'IPALLOC_RANGE', 'DOCKER_NETWORK',
             'CREATE_NETWORK_AUTOMATICALLY', 'GATEWAY_IP',
             'BACKUP_STORAGE_TYPE', 'BACKUP_BASE_DIR',
-            'BACKUP_HOST', 'BACKUP_IDENTITY', 'BACKUP_USER']
+            'BACKUP_HOST', 'BACKUP_IDENTITY', 'BACKUP_USER',
+            'SSL_KEYFILE', 'SSL_CERTFILE']
 
     for opt in opts:
         if opt in os.environ:
@@ -807,6 +808,12 @@ def main():
         global_env.backup_storage = backup_storage.create(
             cfg['BACKUP_STORAGE_TYPE'], backup_config)
 
+    ssl_args = {}
+
+    if 'SSL_KEYFILE' in cfg:
+        ssl_args['keyfile'] = cfg['SSL_KEYFILE']
+        ssl_args['certfile'] = cfg['SSL_CERTFILE']
+
     docker_tls_config = None
     if docker_client_cert or docker_server_cert:
         docker_tls_config = docker.tls.TLSConfig(
@@ -825,7 +832,7 @@ def main():
     else:
         listen_on = (listen_addr, int(listen_port))
 
-    http_server = WSGIServer(listen_on, app)
+    http_server = WSGIServer(listen_on, app, **ssl_args)
 
     logging.info("Listening on: %s", listen_on)
 

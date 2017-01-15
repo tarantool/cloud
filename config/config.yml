@@ -7,3 +7,5 @@ CONSUL_HOST: 127.0.0.1
 #HTTP_BASIC_USERNAME: admin
 #HTTP_BASIC_PASSWORD: ilikerandompasswords
 #BACKUP_DIR: /tmp/backups
+#SSL_CERTFILE: cert.pem
+#SSL_KEYFILE: key.pem
