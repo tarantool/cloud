@@ -18,6 +18,13 @@ import StringIO
 import re
 import copy
 
+try:
+    from ConfigParser import SafeConfigParser
+except ImportError:
+    from configparser import SafeConfigParser
+
+SETTINGS_PATH = os.path.expanduser('~/.taas.cfg')
+
 GROUP_KEY_ORDER = ["id", "creation_time", "name", "type", "memsize"]
 
 _BOUNDARY_CHARS = string.digits + string.ascii_letters
@@ -832,6 +839,21 @@ def servers_ls_command(host, is_quiet, auth, cafile):
         print('\n'.join(groups))
 
 
+def read_config():
+    config = SafeConfigParser({'username': None, 'password': None,
+                               'cafile': None})
+    config.read(SETTINGS_PATH)
+
+    result = {}
+
+    for section in config.sections():
+        result[section] = {}
+        result[section]['username'] = config.get(section.decode('utf-8'), 'username')
+        result[section]['password'] = config.get(section, 'password')
+        result[section]['cafile'] = config.get(section, 'cafile')
+
+    return result
+
 def main():
     # Don't spam with HTTP connection logs from 'requests' module
     logging.getLogger("requests").setLevel(logging.WARNING)
@@ -985,14 +1007,6 @@ def main():
 
     args = parser.parse_args()
 
-    auth = None
-    if args.http_username and args.http_password:
-        auth = (args.http_username, args.http_password)
-
-    cafile = None
-    if args.cafile:
-        cafile = args.cafile
-
     host = None
     if args.host is None:
         if 'TARANTOOL_CLOUD_HOST' in os.environ:
@@ -1001,6 +1015,21 @@ def main():
             sys.exit("Please specify --host or pass TARANTOOL_CLOUD_HOST via env")
     else:
         host = args.host
+
+
+    cfg = read_config()
+
+    auth = None
+    if args.http_username and args.http_password:
+        auth = (args.http_username, args.http_password)
+    elif host in cfg and 'username' in cfg[host] and 'password' in cfg[host]:
+        auth = (cfg[host]['username'], cfg[host]['password'])
+
+    cafile = None
+    if args.cafile:
+        cafile = os.path.expanduser(args.cafile)
+    elif host in cfg:
+        cafile = os.path.expanduser(cfg[host]['cafile'])
 
     if args.subparser_name == 'ps':
         ps_command(host, args.quiet, auth, cafile)
@@ -1032,7 +1061,7 @@ def main():
         restore_command(host, args.group_id, args.backup_id, auth, cafile,
                         args.verbose)
     elif args.subparser_name == 'backups' and args.backup_subparser_name == 'ls':
-        backups_ls_command(host, args.quiet, cafile, auth)
+        backups_ls_command(host, args.quiet, auth, cafile)
     elif args.subparser_name == 'backups' and args.backup_subparser_name == 'rm':
         backups_rm_command(host, args.backup_id, auth, cafile, args.verbose)
     elif args.subparser_name == 'servers' and args.servers_subparser_name == 'ls':
