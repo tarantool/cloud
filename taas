@@ -1027,9 +1027,12 @@ def main():
 
     cafile = None
     if args.cafile:
-        cafile = os.path.expanduser(args.cafile)
+        cafile = args.cafile
     elif host in cfg:
-        cafile = os.path.expanduser(cfg[host]['cafile'])
+        cafile = cfg[host]['cafile']
+
+    if cafile:
+        cafile = os.path.expanduer(cafile)
 
     if args.subparser_name == 'ps':
         ps_command(host, args.quiet, auth, cafile)
