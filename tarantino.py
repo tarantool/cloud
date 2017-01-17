@@ -54,6 +54,10 @@ class DeleteTask(TarantinoTask):
     tarantino_task_type = "delete_tarantino"
 
 
+def backup_is_valid(storage, digest):
+    return True
+
+
 class Tarantino(group.Group):
     def __init__(self, consul_host, group_id):
         super(Tarantino, self).__init__(consul_host, group_id)

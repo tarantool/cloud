@@ -49,6 +49,11 @@ class UpdateTask(TarantoolTask):
 class DeleteTask(TarantoolTask):
     tarantool_task_type = "delete_tarantool"
 
+
+def backup_is_valid(storage, digest):
+    return True
+
+
 class Tarantool(group.Group):
     def __init__(self, consul_host, group_id):
         super(Tarantool, self).__init__(consul_host, group_id)

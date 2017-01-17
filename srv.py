@@ -20,12 +20,14 @@ import argparse
 import yaml
 import ip_pool
 import backup_storage
+import task
 
 import werkzeug
 
 from gevent.wsgi import WSGIServer
 import flask
 from flask import Flask
+from flask import Response
 from flask_restful import reqparse, abort, Api, Resource
 from flask_bootstrap import Bootstrap
 from flask_basicauth import BasicAuth
@@ -455,6 +457,32 @@ class Backup(Resource):
             return '', 204
 
 
+class BackupData(Resource):
+    def get(self, backup_id):
+        abort_if_backup_doesnt_exist(backup_id)
+        backup = backup_to_dict(backup_id)
+        archive_id = backup['archive_id']
+
+        storage = global_env.backup_storage
+        fobj = storage.get_archive(archive_id, decompress=False)
+
+        def download_backup():
+            chunk_size = 8192
+            while True:
+                chunk = fobj.read(chunk_size)
+
+                if len(chunk) == 0:
+                    return
+
+                yield chunk
+
+        return Response(download_backup(),
+                        mimetype="application/gzip",
+                        headers={"Content-Disposition":
+                                 "attachment;filename=backup.tar.gz",
+                                 "Content-Length": backup['size']})
+
+
 class BackupList(Resource):
     def get(self):
         backups = sense.Sense.backups()
@@ -464,6 +492,73 @@ class BackupList(Resource):
             result[backup_id] = backup_to_dict(backup_id)
 
         return result
+
+    def post(self):
+        parser = reqparse.RequestParser(bundle_errors=True)
+        parser.add_argument('async', type=bool, default=False)
+        parser.add_argument('type', required=True)
+        parser.add_argument('file',
+                            type=werkzeug.datastructures.FileStorage,
+                            location='files',
+                            required=True)
+
+        args = parser.parse_args()
+
+        group_type = args['type']
+        stream = args['file'].stream
+
+        if not global_env.backup_storage:
+            abort(500, message="Backup storage not configured")
+
+        storage = global_env.backup_storage
+
+        if group_type not in ['memcached', 'tarantino', 'tarantool']:
+            raise RuntimeError("Unknown group type: %s" % group_type)
+
+        digest, total_size = storage.put_archive(stream, compress=False)
+
+        backup_id = uuid.uuid4().hex
+
+        upload_task = backup_storage.UploadTask(backup_id)
+        TASKS[upload_task.task_id] = upload_task
+
+        def upload_backup(upload_task, storage, group_type, digest, total_size):
+            backup_id = upload_task.backup_id
+
+            try:
+                upload_task.log("Validating backup")
+                if group_type == 'memcached':
+                    backup_is_valid = memcached.backup_is_valid(storage, digest)
+                elif group_type == 'tarantino':
+                    backup_is_valid = tarantino.backup_is_valid(storage, digest)
+                elif group_type == 'tarantool':
+                    backup_is_valid = tarantool.backup_is_valid(storage, digest)
+
+                if not backup_is_valid:
+                    upload_task.set_status(task.STATUS_CRITICAL,
+                                           "Backup is not valid")
+                    return
+                storage.register_backup(backup_id, digest, '',
+                                        group_type, total_size, 0)
+
+                upload_task.set_status(task.STATUS_SUCCESS)
+            except Exception as ex:
+                logging.exception("Failed to upload backup '%s'", backup_id)
+                upload_task.set_status(task.STATUS_CRITICAL, str(ex))
+                raise
+
+        gevent.spawn(upload_backup, upload_task, storage, group_type,
+                     digest, total_size)
+
+        if args['async']:
+            result = {'id': upload_task.backup_id,
+                      'task_id': upload_task.task_id}
+            return result, 202
+
+        else:
+            upload_task.wait_for_completion()
+            return backup_to_dict(backup_id), 201
+
 
 
 class InstanceBackup(Resource):
@@ -569,6 +664,7 @@ def setup_routes():
 
     api.add_resource(BackupList, '/api/backups')
     api.add_resource(Backup, '/api/backups/<backup_id>')
+    api.add_resource(BackupData, '/api/backups/<backup_id>/data')
 
     api.add_resource(ServerList, '/api/servers')
 

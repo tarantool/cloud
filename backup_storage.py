@@ -33,6 +33,10 @@ class DeleteTask(BackupTask):
     backup_task_type = "delete_backup"
 
 
+class UploadTask(BackupTask):
+    backup_task_type = "upload_backup"
+
+
 class BackupRegistry(object):
     def __init__(self):
         pass
@@ -104,7 +108,7 @@ class BackupStorage(object):
             if archive_used:
                 delete_task.log(
                     "Backup '%s' has archive '%s' that is used by " +
-                    "other backups. Keeping it.", (backup_id, archive_id))
+                    "other backups. Keeping it.", backup_id, archive_id)
             else:
                 delete_task.log(
                     "Archive no longer used: '%s'. Removing it.", archive_id)
@@ -113,7 +117,7 @@ class BackupStorage(object):
             delete_task.set_status(task.STATUS_SUCCESS)
         except Exception as ex:
             logging.exception("Failed to unregister backup '%s'", backup_id)
-            task.set_status(delete_task.STATUS_CRITICAL, str(ex))
+            delete_task.set_status(delete_task.STATUS_CRITICAL, str(ex))
 
             raise
 
@@ -133,18 +137,23 @@ class FilesystemBackupStorage(BackupStorage):
 
         self.base_dir = config['base_dir']
 
-    def put_archive(self, stream):
+    def put_archive(self, stream, compress=True):
         archive_id = uuid.uuid4().hex
 
         tmp_path = os.path.join(self.base_dir, archive_id + '_pending.tar.gz')
 
         sha256 = hashlib.new('sha256')
 
-        # Files must have predictable hashes, so timestamp has to be
-        # set to a constant. It is written to the gzip stream.
-        with gzip.GzipFile(tmp_path, 'wb', mtime=0) as fobj:
-            for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
-                fobj.write(chunk)
+        if compress:
+            # Files must have predictable hashes, so timestamp has to be
+            # set to a constant. It is written to the gzip stream.
+            with gzip.GzipFile(fileobj=tmp_path, mode='wb', mtime=0) as fobj:
+                for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
+                    fobj.write(chunk)
+        else:
+            with open(tmp_path, 'wb') as fobj:
+                for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
+                    fobj.write(chunk)
 
         total_size = 0
         with open(tmp_path, 'rb') as fobj:
@@ -159,10 +168,13 @@ class FilesystemBackupStorage(BackupStorage):
 
         return digest, total_size
 
-    def get_archive(self, digest):
+    def get_archive(self, digest, decompress=True):
         fullpath = os.path.join(self.base_dir, digest + '.tar.gz')
 
-        return gzip.GzipFile(fullpath, 'rb')
+        if decompress:
+            return gzip.GzipFile(fullpath, 'rb')
+        else:
+            return open(fullpath, 'rb')
 
     def delete_archive(self, digest):
         fullpath = os.path.join(self.base_dir, digest + '.tar.gz')
@@ -191,15 +203,20 @@ class SSHBackupStorage(BackupStorage):
         self.host = config['host']
         self.password = config.get('password', None)
 
-    def put_archive(self, stream):
+    def put_archive(self, stream, compress=True):
         with tempfile.TemporaryFile(mode='wb+') as tmp_file:
             sha256 = hashlib.new('sha256')
 
-            # Files must have predictable hashes, so timestamp has to be
-            # set to a constant. It is written to the gzip stream.
-            with gzip.GzipFile(fileobj=tmp_file, mode='wb', mtime=0) as fobj:
-                for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
-                    fobj.write(chunk)
+            if compress:
+                # Files must have predictable hashes, so timestamp has to be
+                # set to a constant. It is written to the gzip stream.
+                with gzip.GzipFile(fileobj=tmp_file, mode='wb', mtime=0) as fobj:
+                    for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
+                        fobj.write(chunk)
+            else:
+                with open(tmp_file, 'wb') as fobj:
+                    for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
+                        fobj.write(chunk)
 
             tmp_file.seek(0)
             total_size = 0
@@ -230,7 +247,7 @@ class SSHBackupStorage(BackupStorage):
 
         return digest, total_size
 
-    def get_archive(self, digest):
+    def get_archive(self, digest, decompress=True):
         tmp_file = tempfile.TemporaryFile(mode='wb+')
 
         settings = {'abort_on_prompts': False, 'host_string': self.host,
@@ -252,7 +269,11 @@ class SSHBackupStorage(BackupStorage):
                                fullpath)
 
         tmp_file.seek(0)
-        return gzip.GzipFile(fileobj=tmp_file, mode='rb')
+
+        if decompress:
+            return gzip.GzipFile(fileobj=tmp_file, mode='rb')
+        else:
+            return tmp_file
 
     def delete_archive(self, digest):
         settings = {'abort_on_prompts': False, 'host_string': self.host,

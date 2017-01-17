@@ -52,6 +52,128 @@ def visible_len(string):
     ansi_escape = re.compile(r'\x1b[^m]*m')
     return len(ansi_escape.sub('', string))
 
+
+class MultipartData(object):
+    def __init__(self, fields, files, boundary=None, progress=None):
+        self.progress_callback = progress
+
+        def escape_quote(s):
+            return s.replace('"', '\\"')
+
+        if boundary is None:
+            boundary = ''.join(random.choice(_BOUNDARY_CHARS) for i in
+                               range(30))
+        lines = []
+
+        for name, value in fields.items():
+            lines.extend((
+                '--{0}'.format(boundary),
+                'Content-Disposition: form-data; name="{0}"'.format(
+                    escape_quote(name)),
+                '',
+                str(value),
+            ))
+
+        for name, value in files.items():
+            filename = value['filename']
+            if 'mimetype' in value:
+                mimetype = value['mimetype']
+            else:
+                mimetype = mimetypes.guess_type(filename)[0] or \
+                           'application/octet-stream'
+            lines.extend((
+                '--{0}'.format(boundary),
+                'Content-Disposition: form-data; name="{0}"; filename="{1}"'.format(
+                    escape_quote(name), escape_quote(filename)),
+                'Content-Type: {0}'.format(mimetype),
+                '',
+                value
+            ))
+
+        lines.extend((
+            '--{0}--'.format(boundary),
+            '',
+        ))
+
+        body_len = 0
+        for entry in lines:
+            if isinstance(entry, str):
+                body_len += len(entry) + len('\r\n')
+            elif 'length' in entry:
+                body_len += entry['length'] + len('\r\n')
+            else:
+                raise RuntimeError("No length provided")
+
+        body_len -= len('\r\n')
+
+        self.body_len = body_len
+        self.lines = lines
+
+        headers = {
+            'Content-Type': 'multipart/form-data; boundary={0}'.format(
+                boundary),
+            'Content-Length': str(body_len),
+        }
+
+        self.headers = headers
+        self.buf = ""
+        self.line = 0
+        self.bytes_read = 0
+
+    def progress(self):
+        if self.progress_callback:
+            self.progress_callback(float(self.bytes_read)/float(self.body_len))
+
+    def read(self, num=-1):
+        if num == -1:
+            result = ""
+            chunksize = 8192
+
+            while True:
+                bytes_read = self.read(chunksize)
+                if len(bytes_read) == 0:
+                    break
+                result += bytes_read
+            return result
+
+        while True:
+            if len(self.buf) >= num:
+                result = self.buf[:num]
+                self.buf = self.buf[num:]
+                self.bytes_read += len(result)
+                self.progress()
+                return result
+
+            if self.line >= len(self.lines):
+                result = self.buf
+                self.buf = ''
+                self.bytes_read += len(result)
+                self.progress()
+                return result
+
+            line = self.lines[self.line]
+
+            if isinstance(line, str):
+                self.buf += line
+                self.line += 1
+                if self.line < len(self.lines):
+                    self.buf += '\r\n'
+            else:
+                fobj = line['content']
+
+                to_read = num - len(self.buf)
+                bytes_read = fobj.read(to_read)
+                if len(bytes_read) == 0:
+                    self.line += 1
+                    if self.line < len(self.lines):
+                        self.buf += '\r\n'
+
+                else:
+                    self.buf += bytes_read
+
+
+
+
 def encode_multipart(fields, files, boundary=None):
     r"""Encode dict of form fields and dict of files as multipart/form-data.
     Return tuple of (body_string, headers_dict). Each value in files is a dict
@@ -121,6 +243,30 @@ def encode_multipart(fields, files, boundary=None):
 
     return (body, headers)
 
+
+def print_upload_progress():
+    def closure(fraction):
+        notify_bin = int(fraction*20) * 5
+
+        for val in range(closure.notified_bin, notify_bin, 5):
+            print("%d %%" % (val + 5))
+        closure.notified_bin = notify_bin
+
+    closure.notified_bin = 0
+    return closure
+
+def print_upload_progress_silent():
+    def closure(fraction):
+        notify_bin = int(fraction*20) * 5
+
+        for val in range(closure.notified_bin, notify_bin, 5):
+            print('.', end='')
+        closure.notified_bin = notify_bin
+
+    closure.notified_bin = 0
+    return closure
+
+
 def print_table(header, data):
     lengths = [0] * len(header)
 
@@ -180,15 +326,38 @@ def http_get(url, args=None, auth=None, cafile=None):
 
     return response.getcode(), response_text
 
-def http_post(url, data, auth=None, cafile=None):
-    data_str = json.dumps(data)
-    data_len = len(data_str)
+
+def http_download(url, args=None, auth=None, cafile=None):
+    if args:
+        url = url + '?' + urllib.urlencode(args, True)
+
+    request = urllib2.Request(url)
+    if auth:
+        base64string = base64.encodestring(
+            '%s:%s' % (auth[0], auth[1])).replace('\n', '')
+        request.add_header('Authorization', 'Basic %s' % base64string)
+
+    response = urllib2.urlopen(request, cafile=cafile)
+
+    return response.getcode(), response
+
+
+def http_post(url, data, files=None, auth=None,
+              cafile=None, progress_callback=None):
+    if files:
+        data = MultipartData(data, files, progress=progress_callback)
+        headers = data.headers
+    else:
+        data = json.dumps(data)
+        data_len = len(data)
+        headers = {'Content-Type': 'application/json',
+                   'Content-Length': data_len}
 
     request = urllib2.Request(
         url,
-        data_str,
-        {'Content-Type': 'application/json',
-         'Content-Length': data_len})
+        data,
+        headers
+    )
 
     if auth:
         base64string = base64.encodestring(
@@ -200,9 +369,12 @@ def http_post(url, data, auth=None, cafile=None):
 
     return response.getcode(), response_text.decode('utf-8')
 
-def http_put(url, data, files=None, auth=None, cafile=None):
+
+def http_put(url, data, files=None, auth=None,
+             cafile=None, progress_callback=None):
     if files:
-        data, headers = encode_multipart(data, files)
+        data = MultipartData(data, files, progress=progress_callback)
+        headers = data.headers
     else:
         data = json.dumps(data)
         data_len = len(data)
@@ -487,7 +659,8 @@ def update_command(host, group_id, name, memsize, password, config, heal,
     url = '%s/api/groups/%s' % (add_http_prefix(host), group_id)
 
     try:
-        _, data_str = http_put(url, data, files=files, auth=auth)
+        _, data_str = http_put(url, data, files=files,
+                               auth=auth, cafile=cafile)
     except urllib2.HTTPError, err:
         if err.code == 404:
             print("No such group: '%s'" % group_id)
@@ -744,6 +917,122 @@ def backups_ls_command(host, is_quiet, auth, cafile):
         groups = set([i['backup_id'] for i in result])
         print('\n'.join(groups))
 
+def backups_download_command(host, backup_id, target_file,
+                             auth, cafile, verbose):
+    url = '%s/api/backups/%s/data' % (add_http_prefix(host), backup_id)
+
+    try:
+        _, stream = http_download(url, auth=auth, cafile=cafile)
+    except urllib2.HTTPError, err:
+        if err.code == 404:
+            print("No such backup: '%s'" % backup_id)
+            sys.exit(1)
+        elif err.code == 401:
+            print("Authorization required")
+            sys.exit(1)
+        else:
+            raise
+
+    total_size = int(stream.info().getheader('Content-Length').strip())
+    bytes_read = 0
+    chunk_size = 8192
+
+    if verbose:
+        progress_callback = print_upload_progress()
+    else:
+        progress_callback = print_upload_progress_silent()
+
+    fobj = open(target_file, 'wb')
+
+    while True:
+        chunk = stream.read(chunk_size)
+
+        if len(chunk) == 0:
+            break
+
+        fobj.write(chunk)
+        bytes_read += len(chunk)
+
+        progress_callback(float(bytes_read)/float(total_size))
+
+    if not verbose:
+        print('')
+
+
+def backups_upload_command(host, group_type, backup_file,
+                           auth, cafile, verbose):
+    url = '%s/api/backups' % add_http_prefix(host)
+
+    data = {'async': True,
+            'type': group_type}
+
+    backup_file = os.path.expanduser(backup_file)
+    backup_file = os.path.realpath(backup_file)
+
+    file_length = os.path.getsize(backup_file)
+    fobj = open(backup_file)
+
+    files = {'file': {'filename': 'backup.tar.gz',
+                      'content': fobj,
+                      'length': file_length}}
+
+    progress_callback = None
+
+    if verbose:
+        progress_callback = print_upload_progress()
+    else:
+        progress_callback = print_upload_progress_silent()
+
+    try:
+        _, data_str = http_post(url, data, files=files,
+                                auth=auth, cafile=cafile,
+                                progress_callback=progress_callback)
+    except urllib2.HTTPError, err:
+        if err.code == 401:
+            print("Authorization required")
+            sys.exit(1)
+        else:
+            raise
+
+    data = json.loads(data_str)
+    task_id = data['task_id']
+    backup_id = data['id']
+
+    status = "running"
+    index = 0
+    while status == "running":
+        url = '%s/api/tasks/%s' % (add_http_prefix(host), task_id)
+        args = {"index": index}
+        try:
+            _, data_str = http_get(url, args, auth, cafile)
+        except urllib2.HTTPError, err:
+            if err.code == 401:
+                print("Authorization required")
+                sys.exit(1)
+            else:
+                raise
+        data = json.loads(data_str)
+        index = data['index']
+        status = data['status']
+
+        for log in data['logs']:
+            if verbose:
+                print(log['message'])
+            else:
+                print('.', end='')
+                sys.stdout.flush()
+
+        if status == "error":
+            print("Error: %s" % data['message'])
+            sys.exit(1)
+
+    if not verbose:
+        print('')
+
+    print(backup_id)
+
+
+
 def backups_rm_command(host, backup_id_list, auth, cafile, verbose):
     for backup_id in backup_id_list:
         url = '%s/api/backups/%s' % (add_http_prefix(host), backup_id)
@@ -984,6 +1273,24 @@ def main():
         action='store_true',
         help='only show backup IDs')
 
+    backup_upload_parser = backup_subparsers.add_parser('upload')
+    backup_upload_parser.add_argument(
+        'type',
+        help='instance type to upload backup for')
+
+    backup_upload_parser.add_argument(
+        'file',
+        help='path to the backup tarball')
+
+    backup_download_parser = backup_subparsers.add_parser('download')
+    backup_download_parser.add_argument(
+        'backup_id',
+        help='backup ID to download')
+
+    backup_download_parser.add_argument(
+        'file',
+        help='file to download the backup to')
+
     backup_rm_parser = backup_subparsers.add_parser(
         'rm', help='remove one or more backups')
     backup_rm_parser.add_argument(
@@ -1016,7 +1323,6 @@ def main():
     else:
         host = args.host
 
-
     cfg = read_config()
 
     auth = None
@@ -1032,7 +1338,7 @@ def main():
         cafile = cfg[host]['cafile']
 
     if cafile:
-        cafile = os.path.expanduer(cafile)
+        cafile = os.path.expanduser(cafile)
 
     if args.subparser_name == 'ps':
         ps_command(host, args.quiet, auth, cafile)
@@ -1067,6 +1373,12 @@ def main():
         backups_ls_command(host, args.quiet, auth, cafile)
     elif args.subparser_name == 'backups' and args.backup_subparser_name == 'rm':
         backups_rm_command(host, args.backup_id, auth, cafile, args.verbose)
+    elif args.subparser_name == 'backups' and args.backup_subparser_name == 'upload':
+        backups_upload_command(host, args.type, args.file,
+                               auth, cafile, args.verbose)
+    elif args.subparser_name == 'backups' and args.backup_subparser_name == 'download':
+        backups_download_command(host, args.backup_id, args.file,
+                                 auth, cafile, args.verbose)
     elif args.subparser_name == 'servers' and args.servers_subparser_name == 'ls':
         servers_ls_command(host, args.quiet, auth, cafile)
 

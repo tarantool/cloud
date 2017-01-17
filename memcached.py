@@ -60,6 +60,10 @@ class RestoreTask(MemcachedTask):
     memcached_task_type = "restore_memcached"
 
 
+def backup_is_valid(storage, digest):
+    return True
+
+
 class Memcached(group.Group):
     def __init__(self, consul_host, group_id):
         super(Memcached, self).__init__(consul_host, group_id)
