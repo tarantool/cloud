@@ -496,6 +496,7 @@ class BackupList(Resource):
     def post(self):
         parser = reqparse.RequestParser(bundle_errors=True)
         parser.add_argument('async', type=bool, default=False)
+        parser.add_argument('group_id', default='')
         parser.add_argument('type', required=True)
         parser.add_argument('file',
                             type=werkzeug.datastructures.FileStorage,
@@ -504,6 +505,7 @@ class BackupList(Resource):
 
         args = parser.parse_args()
 
+        group_id = args['group_id']
         group_type = args['type']
         stream = args['file'].stream
 
@@ -538,9 +540,10 @@ class BackupList(Resource):
                     upload_task.set_status(task.STATUS_CRITICAL,
                                            "Backup is not valid")
                     return
-                storage.register_backup(backup_id, digest, '',
+                storage.register_backup(backup_id, digest, group_id,
                                         group_type, total_size, 0)
 
+                sense.Sense.update()
                 upload_task.set_status(task.STATUS_SUCCESS)
             except Exception as ex:
                 logging.exception("Failed to upload backup '%s'", backup_id)

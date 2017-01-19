@@ -307,112 +307,116 @@ class Memcached(group.Group):
         self.unregister_instance("2")
 
     def backup(self, backup_task, storage):
-        services = self.services
-        backup_id = backup_task.backup_id
-        group_id = self.group_id
+        try:
+            services = self.services
+            backup_id = backup_task.backup_id
+            group_id = self.group_id
 
-        backup_task.log("Backing up group '%s'", group_id)
+            backup_task.log("Backing up group '%s'", group_id)
 
-        instance_num = '1'
+            instance_num = '1'
 
-        allocation = self.allocation
-        instance_id = self.group_id + '_' + instance_num
-        docker_host = allocation['instances'][instance_num]['host']
-        docker_hosts = Sense.docker_hosts()
+            allocation = self.allocation
+            instance_id = self.group_id + '_' + instance_num
+            docker_host = allocation['instances'][instance_num]['host']
+            docker_hosts = Sense.docker_hosts()
 
-        docker_addr = None
-        for host in docker_hosts:
-            if host['addr'].split(':')[0] == docker_host or \
-               host['consul_host'] == docker_host:
-                docker_addr = host['addr']
+            docker_addr = None
+            for host in docker_hosts:
+                if host['addr'].split(':')[0] == docker_host or \
+                   host['consul_host'] == docker_host:
+                    docker_addr = host['addr']
 
-        if not docker_addr:
-            raise RuntimeError("No such Docker host: '%s'" % docker_host)
+            if not docker_addr:
+                raise RuntimeError("No such Docker host: '%s'" % docker_host)
 
-        docker_obj = docker.Client(base_url=docker_addr,
-                                   tls=global_env.docker_tls_config)
+            docker_obj = docker.Client(base_url=docker_addr,
+                                       tls=global_env.docker_tls_config)
 
-        cmd = 'ls /var/lib/tarantool'
-        exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
+            cmd = 'ls /var/lib/tarantool'
+            exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
                                          cmd)
-        out = docker_obj.exec_start(exec_id)
-        ret = docker_obj.exec_inspect(exec_id)
+            out = docker_obj.exec_start(exec_id)
+            ret = docker_obj.exec_inspect(exec_id)
 
-        if ret['ExitCode'] != 0:
-            raise RuntimeError("Failed to list snapshots for container " +
-                               instance_id)
+            if ret['ExitCode'] != 0:
+                raise RuntimeError("Failed to list snapshots for container " +
+                                   instance_id)
 
-        files = out.decode('utf-8').split('\n')
-        snapshots = [f for f in files if f.endswith('.snap')]
-        snapshot_lsns = sorted([os.path.splitext(s)[0] for s in snapshots])
-        xlogs = [f for f in files if f.endswith('.xlog')]
-        xlog_lsns = sorted([os.path.splitext(s)[0] for s in xlogs])
+            files = out.decode('utf-8').split('\n')
+            snapshots = [f for f in files if f.endswith('.snap')]
+            snapshot_lsns = sorted([os.path.splitext(s)[0] for s in snapshots])
+            xlogs = [f for f in files if f.endswith('.xlog')]
+            xlog_lsns = sorted([os.path.splitext(s)[0] for s in xlogs])
 
-        if not snapshot_lsns:
-            raise RuntimeError("There are no snapshots to backup")
+            if not snapshot_lsns:
+                raise RuntimeError("There are no snapshots to backup")
 
-        latest_snapshot_lsn = snapshot_lsns[-1]
+            latest_snapshot_lsn = snapshot_lsns[-1]
 
-        older_xlogs = list(filter(
-            lambda x: x <= latest_snapshot_lsn, xlog_lsns))
-        older_xlog = older_xlogs[-1]
+            older_xlogs = list(filter(
+                lambda x: x <= latest_snapshot_lsn, xlog_lsns))
+            older_xlog = older_xlogs[-1]
 
-        newer_xlogs = list(filter(
-            lambda x: x > latest_snapshot_lsn, xlog_lsns))
+            newer_xlogs = list(filter(
+                lambda x: x > latest_snapshot_lsn, xlog_lsns))
 
-        xlogs_to_backup = [older_xlog] + newer_xlogs
+            xlogs_to_backup = [older_xlog] + newer_xlogs
 
-        files_to_backup = [latest_snapshot_lsn + '.snap']
-        files_to_backup += [xlog + '.xlog' for xlog in xlogs_to_backup]
+            files_to_backup = [latest_snapshot_lsn + '.snap']
+            files_to_backup += [xlog + '.xlog' for xlog in xlogs_to_backup]
 
-        backup_task.log("Backing up data: %s", ', '.join(files_to_backup))
+            backup_task.log("Backing up data: %s", ', '.join(files_to_backup))
 
-        tmp_backup_dir = '/var/lib/tarantool/backup-' + uuid.uuid4().hex
+            tmp_backup_dir = '/var/lib/tarantool/backup-' + uuid.uuid4().hex
 
-        cmd = "mkdir '%s'" % tmp_backup_dir
-        exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
-                                         cmd)
-        out = docker_obj.exec_start(exec_id)
-        ret = docker_obj.exec_inspect(exec_id)
-
-        if ret['ExitCode'] != 0:
-            raise RuntimeError(
-                "Failed to create temp backup dir for container " +
-                instance_id)
-
-        for file_to_backup in files_to_backup:
-            cmd = "ln /var/lib/tarantool/%s %s/%s" % (
-                file_to_backup, tmp_backup_dir, file_to_backup)
-            exec_id = docker_obj.exec_create(
-                self.group_id + '_' + instance_num, cmd)
+            cmd = "mkdir '%s'" % tmp_backup_dir
+            exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
+                                             cmd)
             out = docker_obj.exec_start(exec_id)
             ret = docker_obj.exec_inspect(exec_id)
 
             if ret['ExitCode'] != 0:
                 raise RuntimeError(
-                    "Failed to hardlink backup file: " + out.decode('utf-8'))
+                    "Failed to create temp backup dir for container " +
+                    instance_id)
 
-        strm, _ = docker_obj.get_archive(instance_id, tmp_backup_dir+'/.')
-        archive_id, size = storage.put_archive(strm)
+            for file_to_backup in files_to_backup:
+                cmd = "ln /var/lib/tarantool/%s %s/%s" % (
+                    file_to_backup, tmp_backup_dir, file_to_backup)
+                exec_id = docker_obj.exec_create(
+                    self.group_id + '_' + instance_num, cmd)
+                out = docker_obj.exec_start(exec_id)
+                ret = docker_obj.exec_inspect(exec_id)
 
-        cmd = "rm -rf /var/lib/tarantool/backup-*"
-        exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
-                                         cmd)
-        out = docker_obj.exec_start(exec_id)
-        ret = docker_obj.exec_inspect(exec_id)
+                if ret['ExitCode'] != 0:
+                    raise RuntimeError(
+                        "Failed to hardlink backup file: " + out.decode('utf-8'))
 
-        if ret['ExitCode'] != 0:
-            raise RuntimeError(
-                "Failed to remove temp backup dir for container " +
-                instance_id)
+            strm, _ = docker_obj.get_archive(instance_id, tmp_backup_dir+'/.')
+            archive_id, size = storage.put_archive(strm)
 
-        mem_used = services['instances'][instance_num]['mem_used']
-        storage.register_backup(backup_id, archive_id, group_id,
-                                'memcached', size, mem_used)
+            cmd = "rm -rf /var/lib/tarantool/backup-*"
+            exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
+                                             cmd)
+            out = docker_obj.exec_start(exec_id)
+            ret = docker_obj.exec_inspect(exec_id)
 
-        Sense.update()
+            if ret['ExitCode'] != 0:
+                raise RuntimeError(
+                    "Failed to remove temp backup dir for container " +
+                    instance_id)
 
-        backup_task.set_status(task.STATUS_SUCCESS)
+            mem_used = services['instances'][instance_num]['mem_used']
+            storage.register_backup(backup_id, archive_id, group_id,
+                                    'memcached', size, mem_used)
+
+            Sense.update()
+
+            backup_task.set_status(task.STATUS_SUCCESS)
+        except Exception as ex:
+            logging.exception("Failed to backup '%s'", group_id)
+            backup_task.set_status(task.STATUS_CRITICAL, str(ex))
 
     def restore(self, backup_id, storage, restore_task):
         blueprint = self.blueprint

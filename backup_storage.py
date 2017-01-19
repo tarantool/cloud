@@ -147,7 +147,7 @@ class FilesystemBackupStorage(BackupStorage):
         if compress:
             # Files must have predictable hashes, so timestamp has to be
             # set to a constant. It is written to the gzip stream.
-            with gzip.GzipFile(fileobj=tmp_path, mode='wb', mtime=0) as fobj:
+            with gzip.GzipFile(tmp_path, mode='wb', mtime=0) as fobj:
                 for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
                     fobj.write(chunk)
         else:
@@ -214,9 +214,8 @@ class SSHBackupStorage(BackupStorage):
                     for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
                         fobj.write(chunk)
             else:
-                with open(tmp_file, 'wb') as fobj:
-                    for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
-                        fobj.write(chunk)
+                for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
+                    tmp_file.write(chunk)
 
             tmp_file.seek(0)
             total_size = 0

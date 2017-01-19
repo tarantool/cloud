@@ -763,7 +763,7 @@ def backup_command(host, group_id, auth, cafile, verbose):
                                                group_id)
 
     try:
-        _, data_str = http_post(url, args, auth, cafile)
+        _, data_str = http_post(url, args, auth=auth, cafile=cafile)
     except urllib2.HTTPError, err:
         if err.code == 500:
             data = json.loads(err.read())
@@ -826,7 +826,7 @@ def restore_command(host, group_id, backup_id, auth, cafile, verbose):
                                        group_id)
 
     try:
-        _, data_str = http_put(url, args, auth, cafile)
+        _, data_str = http_put(url, args, auth=auth, cafile=cafile)
     except urllib2.HTTPError, err:
         if err.code == 500:
             data = json.loads(err.read())
@@ -959,12 +959,15 @@ def backups_download_command(host, backup_id, target_file,
         print('')
 
 
-def backups_upload_command(host, group_type, backup_file,
+def backups_upload_command(host, group_id, group_type, backup_file,
                            auth, cafile, verbose):
     url = '%s/api/backups' % add_http_prefix(host)
 
     data = {'async': True,
             'type': group_type}
+
+    if group_id:
+        data['group_id'] = group_id
 
     backup_file = os.path.expanduser(backup_file)
     backup_file = os.path.realpath(backup_file)
@@ -988,6 +991,10 @@ def backups_upload_command(host, group_type, backup_file,
                                 auth=auth, cafile=cafile,
                                 progress_callback=progress_callback)
     except urllib2.HTTPError, err:
+        if err.code == 403:
+            error_message = json.loads(err.read())['message']
+            print("Error:", error_message)
+            sys.exit(1)
         if err.code == 401:
             print("Authorization required")
             sys.exit(1)
@@ -996,7 +1003,7 @@ def backups_upload_command(host, group_type, backup_file,
 
     data = json.loads(data_str)
     task_id = data['task_id']
-    backup_id = data['id']
+    backup_id = data.get('id', None)
 
     status = "running"
     index = 0
@@ -1029,7 +1036,8 @@ def backups_upload_command(host, group_type, backup_file,
     if not verbose:
         print('')
 
-    print(backup_id)
+    if backup_id:
+        print(backup_id)
 
 
 
@@ -1282,6 +1290,11 @@ def main():
         'file',
         help='path to the backup tarball')
 
+    backup_upload_parser.add_argument(
+        'group_id',
+        nargs='?',
+        help='group ID to upload backup for')
+
     backup_download_parser = backup_subparsers.add_parser('download')
     backup_download_parser.add_argument(
         'backup_id',
@@ -1374,7 +1387,7 @@ def main():
     elif args.subparser_name == 'backups' and args.backup_subparser_name == 'rm':
         backups_rm_command(host, args.backup_id, auth, cafile, args.verbose)
     elif args.subparser_name == 'backups' and args.backup_subparser_name == 'upload':
-        backups_upload_command(host, args.type, args.file,
+        backups_upload_command(host, args.group_id, args.type, args.file,
                                auth, cafile, args.verbose)
     elif args.subparser_name == 'backups' and args.backup_subparser_name == 'download':
         backups_download_command(host, args.backup_id, args.file,
