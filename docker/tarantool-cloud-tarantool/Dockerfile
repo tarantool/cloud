@@ -1,4 +1,4 @@
-FROM tarantool/tarantool
+FROM tarantool/tarantool:1.7
 
 RUN mkdir /var/lib/mon.d \
     && mkdir -p /opt/deploy/initial \

@@ -14,11 +14,18 @@ console.on_start(function(self)
         os.exit(1)
     end
 
-    cmd = 'box.info.replication.status'
+    local cmd = 'box.info.replication'
+
     local res = self:eval(cmd)
     if res ~= nil then
         res = yaml.decode(res)
-        print(res[1])
+        local status = 'follow'
+        for _, entry in pairs(res[1]) do
+            if entry.status ~= 'follow' then
+                status = 'error'
+            end
+        end
+        print(status)
     end
 
     os.exit(0)
