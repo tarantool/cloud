@@ -107,7 +107,7 @@ class Sense(object):
         for key, value in tarantool_kv.items():
             match = re.match('tarantool/(.*)/blueprint/memsize', key)
             if match:
-                groups[match.group(1)]['memsize'] = float(value)
+                groups[match.group(1)]['memsize'] = int(value)
 
             match = re.match('tarantool/(.*)/blueprint/creation_time', key)
             if match:
@@ -208,7 +208,7 @@ class Sense(object):
                              key)
             if match:
                 backup_id = match.group(1)
-                backups[backup_id]['mem_used'] = float(value)
+                backups[backup_id]['mem_used'] = int(value)
 
 
         return dict(backups)
@@ -244,7 +244,7 @@ class Sense(object):
                 for check in entry['Checks']:
                     if check['Name'] == 'Memory Utilization':
                         try:
-                            mem = int(check['Output']) / (1024**3)
+                            mem = int(int(check['Output']) / (1024**2))
                         except ValueError:
                             pass
 
@@ -320,8 +320,8 @@ class Sense(object):
             if consul_host in global_env.docker_info:
                 info = global_env.docker_info[consul_host]
 
-                cpus = float(info['NCPU'])
-                memory = float(info['MemTotal']) / (1024**3)
+                cpus = int(info['NCPU'])
+                memory = int(int(info['MemTotal']) / (1024**2))
 
             addr = service_addr
             if port:

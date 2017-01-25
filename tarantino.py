@@ -289,7 +289,7 @@ class Tarantino(group.Group):
 
         environment = {}
 
-        environment['TARANTOOL_SLAB_ALLOC_ARENA'] = memsize
+        environment['TARANTOOL_SLAB_ALLOC_ARENA'] = float(memsize)/1024
 
         if password:
             environment['MEMCACHED_PASSWORD'] = password
@@ -429,7 +429,7 @@ class Tarantino(group.Group):
             if not docker_addr:
                 raise RuntimeError("No such Docker host: '%s'" % docker_host)
 
-            logging.info("Resizing container '%s' to %f GiB on '%s'",
+            logging.info("Resizing container '%s' to %d MiB on '%s'",
                          instance_id,
                          memsize,
                          docker_host)
@@ -438,7 +438,7 @@ class Tarantino(group.Group):
                                        tls=global_env.docker_tls_config)
 
             cmd = "tarantool_set_config.lua TARANTOOL_SLAB_ALLOC_ARENA " + \
-                  str(memsize)
+                  str(float(memsize)/1024)
 
             exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
                                              cmd)

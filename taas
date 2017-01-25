@@ -428,6 +428,58 @@ def colorize_state(state_name, state_type):
         return color_string(state_name, termcolors.FAIL)
 
 
+def update_images_command(host, auth, cafile, verbose):
+    url = '%s/api/update_images' % add_http_prefix(host)
+
+    args = {'async': True}
+    try:
+        _, data_str = http_post(url, args, auth=auth, cafile=cafile)
+    except urllib2.HTTPError, err:
+        if err.code == 403:
+            data = json.loads(err.read())
+            print("Failed to run instance: %s" % data['message'])
+            sys.exit(1)
+        elif err.code == 401:
+            print("Authorization required")
+            sys.exit(1)
+        else:
+            raise
+
+    data = json.loads(data_str)
+
+    task_id = data['task_id']
+
+    status = "running"
+    index = 0
+    while status == "running":
+        url = '%s/api/tasks/%s' % (add_http_prefix(host), task_id)
+        args = {"index": index}
+        try:
+            _, data_str = http_get(url, args, auth, cafile)
+        except urllib2.HTTPError, err:
+            if err.code == 401:
+                print("Authorization required")
+                sys.exit(1)
+            else:
+                raise
+        data = json.loads(data_str)
+        index = data['index']
+        status = data['status']
+        for log in data['logs']:
+            if verbose:
+                print(log['message'])
+            else:
+                print('.', end='')
+                sys.stdout.flush()
+
+        if status == "error":
+            print("Error: %s" % data['message'])
+            sys.exit(1)
+
+    if not verbose:
+        print('')
+
+
 def ps_command(host, is_quiet, auth, cafile):
     url = '%s/api/groups' % add_http_prefix(host)
 
@@ -446,9 +498,15 @@ def ps_command(host, is_quiet, auth, cafile):
     for group_id, group in data.items():
         for instance in group['instances']:
             if instance['mem_used'] is not None:
-                mem_used = "{0:.3f}".format(instance['mem_used'])
+                mem_used = str(instance['mem_used'])
             else:
                 mem_used = 'N/A'
+
+            if instance['host'] is not None:
+                host = instance['host']
+            else:
+                host = 'N/A'
+
             result.append({
                 'group_id': color_string(group_id, termcolors.OKBLUE),
                 'instance_num': instance['name'],
@@ -460,7 +518,7 @@ def ps_command(host, is_quiet, auth, cafile):
                                         instance['state']['type']),
                 'addr': instance['addr'],
                 'port': str(instance['port']),
-                'host': instance['host'],
+                'host': host,
                 'date': group['creation_time'].split('T')[0],
                 'time': group['creation_time'].split('.')[0]
             })
@@ -529,9 +587,13 @@ def run_command(host, instance_type,
     url = '%s/api/groups' % add_http_prefix(host)
 
     try:
-        _, data_str = http_post(url, args, auth, cafile)
+        _, data_str = http_post(url, args, auth=auth, cafile=cafile)
     except urllib2.HTTPError, err:
-        if err.code == 401:
+        if err.code == 403:
+            data = json.loads(err.read())
+            print("Failed to run instance: %s" % data['message'])
+            sys.exit(1)
+        elif err.code == 401:
             print("Authorization required")
             sys.exit(1)
         else:
@@ -645,15 +707,20 @@ def update_command(host, group_id, name, memsize, password, config, heal,
             tar.add(config, arcname=".")
             tar.close()
             filename = 'config.tar.gz'
-            filedata = out.getvalue()
+            out.seek(0, os.SEEK_END)
+            file_length = out.tell()
+            out.seek(0)
+            filedata = out
             is_dir = True
         else:
             filename = os.path.basename(config)
-            filedata = open(config).read()
+            file_length = os.path.getsize(config)
+            filedata = open(config)
             is_dir = False
 
         files = {'config': {'filename': filename,
-                            'content': filedata}}
+                            'content': filedata,
+                            'length': file_length}}
         data['config_is_dir'] = is_dir
 
     url = '%s/api/groups/%s' % (add_http_prefix(host), group_id)
@@ -1116,7 +1183,7 @@ def servers_ls_command(host, is_quiet, auth, cafile):
             'status': colorize_state(server['state']['name'],
                                      server['state']['type']),
             'cpus': '%d' % server['cpus'],
-            'memory': "{0:.3f}".format(server['memory'])
+            'memory': str(server['memory'])
         })
 
     result = sorted(result, key=lambda x: x['addr'])
@@ -1179,6 +1246,9 @@ def main():
 
     subparsers = parser.add_subparsers(title="commands", dest="subparser_name")
 
+    update_images_parser = subparsers.add_parser(
+        'update_images', help='update docker images')
+
     ps_parser = subparsers.add_parser(
         'ps', help='show a list of running groups')
     ps_parser.add_argument(
@@ -1201,9 +1271,9 @@ def main():
     run_parser.add_argument(
         '--memsize',
         type=float,
-        help='amount of memory to allocate, in GiB (default is 0.5)',
+        help='amount of memory to allocate, in MiB (default is 500)',
         nargs='?',
-        default=0.5)
+        default=500)
     run_parser.add_argument(
         '--password',
         help='password for accessing this group')
@@ -1353,9 +1423,11 @@ def main():
     if cafile:
         cafile = os.path.expanduser(cafile)
 
-    if args.subparser_name == 'ps':
+    if args.subparser_name == 'update_images':
+        update_images_command(host, auth, cafile, args.verbose)
+    elif args.subparser_name == 'ps':
         ps_command(host, args.quiet, auth, cafile)
-    if args.subparser_name == 'inspect':
+    elif args.subparser_name == 'inspect':
         inspect_command(host, args.group_id, auth, cafile)
     elif args.subparser_name == 'run':
         run_command(host, args.type,

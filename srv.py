@@ -176,6 +176,18 @@ def group_to_dict(group_id):
     return result
 
 
+class UpdateImagesTask(task.Task):
+    task_type = "update_images"
+
+    def __init__(self):
+        super().__init__(self.task_type)
+
+    def get_dict(self, index=None):
+        obj = super().get_dict(index)
+        return obj
+
+
+
 class Group(Resource):
     def get(self, group_id):
         abort_if_group_doesnt_exist(group_id)
@@ -225,7 +237,7 @@ class Group(Resource):
 
         parser = reqparse.RequestParser(bundle_errors=True)
         parser.add_argument('name', default='')
-        parser.add_argument('memsize', type=float)
+        parser.add_argument('memsize', type=int)
         parser.add_argument('async', type=bool, default=False)
         parser.add_argument('heal', type=bool, default=False)
         parser.add_argument('password', type=str)
@@ -329,7 +341,7 @@ class GroupList(Resource):
         parser = reqparse.RequestParser(bundle_errors=True)
         parser.add_argument('type', required=True)
         parser.add_argument('name', required=True)
-        parser.add_argument('memsize', type=float, default=0.5)
+        parser.add_argument('memsize', type=int, default=500)
         parser.add_argument('password', type=str, default=None)
         parser.add_argument('async', type=bool, default=False)
 
@@ -648,6 +660,46 @@ class InstanceList(Resource):
 
         return result
 
+
+def update_images(update_task):
+    try:
+        update_task.log("Updating docker images")
+        docker_hosts = sense.Sense.docker_hosts()
+
+        for docker_host in docker_hosts:
+            docker_addr = docker_host['addr']
+            update_task.log("Updating tarantool image on host %s",
+                            docker_addr)
+            tarantool.Tarantool.ensure_image(docker_addr, force=True)
+            update_task.log("Updating memcached image on host %s",
+                            docker_addr)
+            memcached.Memcached.ensure_image(docker_addr, force=True)
+
+        update_task.set_status(task.STATUS_SUCCESS)
+    except Exception as ex:
+        logging.exception("Failed to update images")
+        update_task.set_status(task.STATUS_CRITICAL, str(ex))
+
+
+class UpdateImages(Resource):
+    def post(self):
+        parser = reqparse.RequestParser(bundle_errors=True)
+        parser.add_argument('async', type=bool, default=False)
+        args = parser.parse_args()
+
+        update_task = UpdateImagesTask()
+        TASKS[update_task.task_id] = update_task
+        gevent.spawn(update_images, update_task)
+
+        if args['async']:
+            result = {'task_id': update_task.task_id}
+            return result, 202
+
+        else:
+            update_task.wait_for_completion()
+            return {}, 201
+
+
 def setup_routes():
     api.add_resource(GroupList, '/api/groups')
     api.add_resource(Group, '/api/groups/<group_id>')
@@ -670,6 +722,8 @@ def setup_routes():
     api.add_resource(BackupData, '/api/backups/<backup_id>/data')
 
     api.add_resource(ServerList, '/api/servers')
+
+    api.add_resource(UpdateImages, '/api/update_images')
 
 
 @app.route('/servers')
@@ -731,9 +785,9 @@ def create_group():
     name=flask.request.form['name']
 
     try:
-        memsize=float(flask.request.form['memsize'])
+        memsize=int(flask.request.form['memsize'])
     except ValueError:
-        memsize = 0.5
+        memsize = 500
 
     group_id = uuid.uuid4().hex
     create_task = memcached.CreateTask(group_id)
@@ -747,7 +801,7 @@ def create_group():
 def resize_group(group_id):
     memsize = None
     try:
-        memsize=float(flask.request.form['memsize'])
+        memsize=int(flask.request.form['memsize'])
     except ValueError:
         return flask.redirect("/groups")
 

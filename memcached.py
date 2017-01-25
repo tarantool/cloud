@@ -451,8 +451,8 @@ class Memcached(group.Group):
                                            tls=global_env.docker_tls_config)
 
                 if mem_used > blueprint['memsize']:
-                    err = ("Backed up instance used {0:.3f} GiB of RAM, but " +
-                           "instance {} only has {0:.3f} GiB max").format(
+                    err = ("Backed up instance used {} MiB of RAM, but " +
+                           "instance {} only has {} MiB max").format(
                                mem_used, group_id, blueprint['memsize'])
                     restore_task.set_status(task.STATUS_CRITICAL, err)
                     return
@@ -854,7 +854,7 @@ class Memcached(group.Group):
 
         environment = {}
 
-        environment['TARANTOOL_SLAB_ALLOC_ARENA'] = memsize
+        environment['TARANTOOL_SLAB_ALLOC_ARENA'] = float(memsize)/1024
 
         if password:
             environment['MEMCACHED_PASSWORD'] = password
@@ -961,7 +961,7 @@ class Memcached(group.Group):
 
         environment = {}
 
-        environment['TARANTOOL_SLAB_ALLOC_ARENA'] = memsize
+        environment['TARANTOOL_SLAB_ALLOC_ARENA'] = float(memsize)/1024
 
         if replica_ip:
             environment['TARANTOOL_REPLICATION_SOURCE'] = replica_ip + ':3301'
@@ -1035,7 +1035,7 @@ class Memcached(group.Group):
             if not docker_addr:
                 raise RuntimeError("No such Docker host: '%s'" % docker_host)
 
-            logging.info("Resizing container '%s' to %f GiB on '%s'",
+            logging.info("Resizing container '%s' to %d MiB on '%s'",
                          instance_id,
                          memsize,
                          docker_host)
@@ -1044,7 +1044,7 @@ class Memcached(group.Group):
                                        tls=global_env.docker_tls_config)
 
             cmd = "tarantool_set_config.lua TARANTOOL_SLAB_ALLOC_ARENA " + \
-                  str(memsize)
+                  str(float(memsize)/1024)
 
             exec_id = docker_obj.exec_create(self.group_id + '_' + instance_num,
                                              cmd)
@@ -1149,27 +1149,36 @@ class Memcached(group.Group):
             raise RuntimeError("No such container: %s", instance_id)
 
 
-
-    def ensure_image(self, docker_addr):
+    @classmethod
+    def ensure_image(cls, docker_addr, force=False):
         docker_obj = docker.Client(base_url=docker_addr,
                                    tls=global_env.docker_tls_config)
         image_exists = any(['tarantool-cloud-memcached:latest' in (i['RepoTags'] or [])
                             for i in docker_obj.images()])
 
-        if image_exists:
+        if image_exists and not force:
             return
 
-        response = docker_obj.build(path='docker/tarantool-cloud-memcached',
+        docker_obj.pull("tarantool/tarantool")
+
+        dockerfile_path = os.path.dirname(os.path.realpath(__file__))
+        dockerfile_path = os.path.join(dockerfile_path,
+                                       'docker/tarantool-cloud-memcached')
+
+        response = docker_obj.build(path=dockerfile_path,
                                     rm=True,
                                     tag='tarantool-cloud-memcached',
                                     dockerfile='Dockerfile')
 
         for line in response:
-            decoded_line = json.loads(line.decode('utf-8'))
-            if 'stream' in decoded_line:
-                logging.info("Build memcached on %s: %s",
-                             docker_addr,
-                             decoded_line['stream'])
+            for line in line.decode('utf-8').split('\r\n'):
+                if not line:
+                    continue
+                decoded_line = json.loads(line)
+                if 'stream' in decoded_line:
+                    logging.info("Build tarantool on %s: %s",
+                                 docker_addr,
+                                 decoded_line['stream'])
 
     def ensure_network(self, docker_addr):
         docker_obj = docker.Client(base_url=docker_addr,
