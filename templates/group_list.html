@@ -43,8 +43,8 @@
       <th>ID</th>
       <th>Name</th>
       <th>Type</th>
-      <th style="text-align: right;">Memory Limit, GiB</th>
-      <th style="text-align: right;">Memory Used, GiB</th>
+      <th style="text-align: right;">Memory Limit, MiB</th>
+      <th style="text-align: right;">Memory Used, MiB</th>
     </tr>
   </thead>
 
@@ -69,7 +69,7 @@
       <td>{{ group['name'] }}</td>
       <td>{{ group['type'] }}</td>
       <td align="right">{{ group['memsize'] }}</td>
-      <td align="right">{{ "{0:.3f}".format(group['mem_used']) }}</td>
+      <td align="right">{{ group['mem_used'] }}</td>
     </tr>
   {% endfor %}
   </tbody>

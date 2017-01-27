@@ -27,8 +27,8 @@
       <th>Consul Host</th>
       <th>Status</th>
       <th style="text-align: right;">CPUs</th>
-      <th style="text-align: right;"> Total Memory, GiB</th>
-      <th style="text-align: right;"> Used Memory, GiB</th>
+      <th style="text-align: right;"> Total Memory, MiB</th>
+      <th style="text-align: right;"> Used Memory, MiB</th>
 
     </tr>
   </thead>
@@ -51,7 +51,7 @@
     {% endif %}
 
     {% if server['memory'] %}
-      {% set memory = "{0:0.1f}".format(server['memory']) %}
+      {% set memory = server['memory'] %}
     {% else %}
       {% set memory = 'Unknown' %}
     {% endif %}
