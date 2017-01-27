@@ -42,7 +42,7 @@ class tarantool_cloud::consul_agent{
   }
 
   file {'/etc/default/consul_docker':
-    content => "DOCKER_HOST=${tarantool_cloud::advertise_addr}:2376
+    content => "DOCKER_HOST=tcp://${tarantool_cloud::advertise_addr}:2376
 DOCKER_TLS_VERIFY=1
 DOCKER_CERT_PATH=${tarantool_cloud::tls_dir}"
   }
