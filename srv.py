@@ -793,7 +793,7 @@ def create_group():
     create_task = memcached.CreateTask(group_id)
     TASKS[create_task.task_id] = create_task
 
-    memcached.Memcached.create(create_task, name, memsize, 10)
+    memcached.Memcached.create(create_task, name, memsize, None, 10)
 
     return flask.redirect("/groups")
 
