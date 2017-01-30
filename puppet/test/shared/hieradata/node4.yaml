@@ -1,3 +1,8 @@
 tarantool_cloud::advertise_addr: 172.16.20.15
 tarantool_cloud::agent: true
 tarantool_cloud::instance_manager: true
+tarantool_cloud::ca_cert: puppet:///files/ca/ca.crt
+tarantool_cloud::server_cert: puppet:///files/ca/servers/node4-ubuntu-1604/server.crt
+tarantool_cloud::server_key: puppet:///files/ca/servers/node4-ubuntu-1604/server.key
+tarantool_cloud::client_cert: puppet:///files/ca/client.crt
+tarantool_cloud::client_key: puppet:///files/ca/client.key

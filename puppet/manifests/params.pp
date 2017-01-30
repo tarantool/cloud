@@ -21,4 +21,9 @@ class tarantool_cloud::params {
   $elasticsearch_port  = 9200
   $elasticsearch_index = 'fluentd'
   $elasticsearch_type  = 'fluentd'
+  $ca_cert             = undef
+  $server_cert         = undef
+  $server_key          = undef
+  $client_cert         = undef
+  $client_key          = undef
 }

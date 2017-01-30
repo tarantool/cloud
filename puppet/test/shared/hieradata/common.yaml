@@ -5,3 +5,9 @@ tarantool_cloud::acl_master_token: 0020D598-7CC6-4878-ACF2-687122881682
 tarantool_cloud::acl_token: 24ED2EFA-E57A-41F7-9FB6-601579653C05
 tarantool_cloud::datacenter: east-aws
 tarantool_cloud::num_servers: 3
+tarantool_cloud::elasticsearch: true
+tarantool_cloud::elasticsearch_host: tarcl1.dev.mail.ru
+tarantool_cloud::elasticsearch_index: elasticsearch-tarantool
+tarantool_cloud::elasticsearch_type: docker
+tarantool_cloud::logstash_prefix: docker
+fluentd::repo_gpgkeyid: BEE682289B2217F45AF4CC3F901F9177AB97ACBE

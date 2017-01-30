@@ -77,6 +77,26 @@
 # [*logstash_prefix*]
 #   Elasticsearch index prefix
 #
+# [*ca_cert*]
+#   Path to the TLS CA cert file. Generated automatically if not specified.
+#   Generate manually with ./ca.py ca
+#
+# [*server_cert*]
+#   Path to the server TLS cert file. Generated automatically if not
+#   specified. Generate manually with ./ca.py server <hostname>
+#
+# [*server_key*]
+#   Path to the server TLS key file. Generated automatically if not
+#   specified. Generate manually with ./ca.py server <hostname>
+#
+# [*client_cert*]
+#   Path to the client TLS cert file. Generated automatically if not
+#   specified. Generate manually with ./ca.py client
+#
+# [*client_key*]
+#   Path to the client TLS key file. Generated automatically if not
+#   specified. Generate manually with ./ca.py client
+#
 class tarantool_cloud(
   $agent               = $tarantool_cloud::params::agent,
   $instance_manager    = $tarantool_cloud::params::instance_manager,
@@ -96,7 +116,12 @@ class tarantool_cloud(
   $elasticsearch_port  = $tarantool_cloud::params::elasticsearch_port,
   $elasticsearch_index = $tarantool_cloud::params::elasticsearch_index,
   $elasticsearch_type  = $tarantool_cloud::params::elasticsearch_type,
-  $logstash_prefix     = $tarantool_cloud::params::logstash_prefix
+  $logstash_prefix     = $tarantool_cloud::params::logstash_prefix,
+  $ca_cert             = $tarantool_cloud::params::ca_cert,
+  $server_cert         = $tarantool_cloud::params::server_cert,
+  $server_key          = $tarantool_cloud::params::server_key,
+  $client_cert         = $tarantool_cloud::params::client_cert,
+  $client_key          = $tarantool_cloud::params::client_key
 ) inherits tarantool_cloud::params {
   validate_bool($agent)
   validate_bool($instance_manager)

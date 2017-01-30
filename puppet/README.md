@@ -53,6 +53,10 @@ the client has proper client certificate.
 The Instance Manager uses TLS certificates and Consul API tokens to
 authenticate.
 
+If you want to generate certificates manually, e.g. when you have
+multiple puppet masters, you should specify *_cert and *_key parameters
+of tarantool_cloud.
+
 ## Usage
 
 You can take a look at the example hiera config in test/shared, and at
@@ -116,6 +120,12 @@ class { 'tarantool_cloud':
 * elasticsearch_index -- Elasticsearch index to write logs to
 * elasticsearch_type -- Default type of entries sent to elasticsearch
 * logstash_prefix -- Elasticsearch index prefix
+* ca_cert -- Path to the TLS CA certificate
+* server_cert -- Path to the server TLS certificate
+* server_key -- Path to the server TLS key
+* client_cert -- Path to the client TLS certificate
+* client_key -- Path to the client TLS key
+
 ## Testing
 
 This manifest has no integration tests, but there is a test-kitchen definition

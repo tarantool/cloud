@@ -35,30 +35,80 @@ class tarantool_cloud::tls {
     path    => $::path
     } -> file { $tls_dir : }
 
-    file { "${tls_dir}/ca.pem":
-      ensure  => file,
-      content => generate($ca_generator, '-d', $ca_dir, 'ca', '--cert')
+    if ($tarantool_cloud::ca_cert == undef)
+    {
+      file { "${tls_dir}/ca.pem":
+        ensure  => file,
+        content => generate($ca_generator, '-d', $ca_dir, 'ca', '--cert')
+      }
+    }
+    else
+    {
+      file { "${tls_dir}/ca.pem":
+        ensure => file,
+        source => $tarantool_cloud::ca_cert
+      }
     }
 
-    file { "${tls_dir}/server_key.pem":
-      ensure  => file,
-      content => generate($ca_generator, '-d', $ca_dir, 'server', '--key',
-      $server_hostname, $altnames_str)
+    if ($tarantool_cloud::server_key == undef)
+    {
+      file { "${tls_dir}/server_key.pem":
+        ensure  => file,
+        content => generate($ca_generator, '-d', $ca_dir, 'server', '--key',
+        $server_hostname, $altnames_str)
+      }
+    }
+    else
+    {
+      file { "${tls_dir}/server_key.pem":
+        ensure => file,
+        source => $tarantool_cloud::server_key
+      }
     }
 
-    file { "${tls_dir}/server_cert.pem":
-      ensure  => file,
-      content => generate($ca_generator, '-d', $ca_dir, 'server', '--cert',
-      $server_hostname, $altnames_str)
+    if ($tarantool_cloud::server_cert == undef)
+    {
+      file { "${tls_dir}/server_cert.pem":
+        ensure  => file,
+        content => generate($ca_generator, '-d', $ca_dir, 'server', '--cert',
+        $server_hostname, $altnames_str)
+      }
+    }
+    else
+    {
+      file { "${tls_dir}/server_cert.pem":
+        ensure => file,
+        source => $tarantool_cloud::server_cert
+      }
     }
 
-    file { "${tls_dir}/key.pem":
-      ensure  => file,
-      content => generate($ca_generator, '-d', $ca_dir, 'client', '--key')
+    if ($tarantool_cloud::client_key == undef)
+    {
+      file { "${tls_dir}/key.pem":
+        ensure  => file,
+        content => generate($ca_generator, '-d', $ca_dir, 'client', '--key')
+      }
+    }
+    else
+    {
+      file { "${tls_dir}/key.pem":
+        ensure => file,
+        source => $tarantool_cloud::client_key
+      }
     }
 
-    file { "${tls_dir}/cert.pem":
-      ensure  => file,
-      content => generate($ca_generator, '-d', $ca_dir, 'client', '--cert')
+    if ($tarantool_cloud::client_cert == undef)
+    {
+      file { "${tls_dir}/cert.pem":
+        ensure  => file,
+        content => generate($ca_generator, '-d', $ca_dir, 'client', '--cert')
+      }
+    }
+    else
+    {
+      file { "${tls_dir}/cert.pem":
+        ensure => file,
+        source => $tarantool_cloud::client_cert
+      }
     }
 }
