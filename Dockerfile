@@ -17,7 +17,7 @@ RUN set -x \
         tarantool \
         ipaddress \
         docker-py \
-        "python-consul==0.6.1" \
+        python-consul \
         python-dateutil \
         gevent flask \
         flask-restful \
@@ -29,13 +29,6 @@ RUN set -x \
     && mkdir /im \
     && mkdir /im/templates \
     && mkdir /im/docker
-
-COPY python_consul_token.patch /
-RUN set -x \
-    && cd /usr/lib/python3.5/site-packages \
-    && patch -p1 < /python_consul_token.patch \
-    && rm /python_consul_token.patch
-
 
 COPY *.py /im/
 COPY templates/ /im/templates/

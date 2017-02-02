@@ -4,7 +4,7 @@ services:
   consul1:
     image: consul
     ports:
-      - "8500:8500"
+      - "8501:8500"
     tmpfs: /tmp/consul
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -14,7 +14,7 @@ services:
           "services": [{
             "name": "docker",
             "address": "unix://var/run/docker.sock",
-            "tags": ["lb_group=primary"]
+            "tags": ["lb_group=primary", "im"]
           }]
         }
       DOCKER_HOST: unix:///var/run/docker.sock
