@@ -46,7 +46,7 @@ def allocate(memory, anti_affinity = []):
         addr = docker_host['addr'].split(':')[0]
         free_mem = docker_host['memory'] - memory_used[addr]
         if free_mem > memory:
-            logging.info("Allocating new instance with %f GiB memory at '%s'",
+            logging.info("Allocating new instance with %d MiB memory at '%s'",
                          memory,
                          addr)
             return addr
@@ -54,7 +54,7 @@ def allocate(memory, anti_affinity = []):
     docker_host = sorted_scores[0][2]
     addr = docker_host['addr'].split(':')[0]
 
-    logging.info("There were no hosts with %f GiB of free memory, " +
+    logging.info("There were no hosts with %d MiB of free memory, " +
                  "so allocating instance on '%s'",
                  memory,
                  addr)
