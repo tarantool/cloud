@@ -1,5 +1,5 @@
 [Service]
 Environment=CONSUL_HTTP_TOKEN={{consul_acl_token}}
 ExecStart=
-ExecStart=/usr/bin/docker --tlsverify --tlscacert=/etc/tarantool-cloud/tls/ca.pem --tlscert=/etc/tarantool-cloud/tls/server-cert.pem --tlskey=/etc/tarantool-cloud/tls/server-key.pem daemon -H unix:///var/run/docker.sock -H tcp://0.0.0.0:2376 --cluster-store=consul://localhost:8500 --cluster-advertise={{advertise_addr}}:2376 --log-driver=fluentd --log-opt fluentd-address=localhost:24224 --storage-driver=overlay
+ExecStart=/usr/bin/docker --tlsverify --tlscacert=/etc/tarantool-cloud/tls/ca.pem --tlscert=/etc/tarantool-cloud/tls/server-cert.pem --tlskey=/etc/tarantool-cloud/tls/server-key.pem daemon -H unix:///var/run/docker.sock -H tcp://0.0.0.0:2376 --cluster-store=consul://localhost:8500 --cluster-advertise={{advertise_addr}}:2376 --log-driver=fluentd --log-opt fluentd-address=localhost:24224 --storage-driver=overlay --live-restore
 
