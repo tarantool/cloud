@@ -9,6 +9,6 @@ COPY tarantool-memcached.conf /etc/sasl2/tarantool-memcached.conf
 COPY app.lua /opt/tarantool
 COPY memcached_set_password.lua /usr/local/bin/
 
-EXPOSE 11211
+EXPOSE 11211 3301
 
 CMD ["tarantool", "/opt/tarantool/app.lua"]
