@@ -11,6 +11,7 @@ services:
     environment:
       CONSUL_LOCAL_CONFIG: |
         {
+          "enable_script_checks": true,
           "services": [{
             "name": "docker",
             "address": "unix://var/run/docker.sock",
