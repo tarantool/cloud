@@ -2,7 +2,7 @@ version: '2'
 services:
   # Instances to run cloud containers
   consul1:
-    image: consul
+    image: consul:0.9.3
     ports:
       - "8501:8500"
     tmpfs: /tmp/consul
