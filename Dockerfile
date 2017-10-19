@@ -1,4 +1,4 @@
-FROM alpine:3.4
+FROM alpine:3.5
 
 ENV PYTHONUNBUFFERED=1
 
@@ -7,12 +7,15 @@ RUN set -x \
         python3 \
         libffi \
         openssl \
+        ca-certificates \
     && apk add --no-cache --virtual .build-deps \
         python3-dev \
         musl-dev \
         gcc \
         libffi-dev \
         openssl-dev \
+        make \
+    && pip3 install --upgrade pip \
     && pip3 install \
         tarantool \
         ipaddress \
