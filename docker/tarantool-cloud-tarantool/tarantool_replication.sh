@@ -21,7 +21,7 @@ console.on_start(function(self)
         res = yaml.decode(res)
         local status = 'follow'
         for _, entry in pairs(res[1]) do
-            if entry.status ~= 'follow' then
+            if entry.upstream and entry.upstream.status ~= 'follow' then
                 status = 'error'
             end
         end
